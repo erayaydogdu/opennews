@@ -23,10 +23,17 @@ class Settings:
         "financial_market,policy_regulation,company_event,macro_economy,industry_trend",
     )
 
+    # Step3: Redis 时序记忆
+    redis_url: str = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+    memory_window_days: int = int(os.getenv("MEMORY_WINDOW_DAYS", "30"))
+
     checkpoint_file: str = os.getenv("CHECKPOINT_FILE", "seeds/checkpoint.json")
     news_sources: str = os.getenv(
         "NEWS_SOURCES",
-        "https://feeds.reuters.com/reuters/businessNews",
+        # Step3: 多平台新闻源（逗号分隔）
+        "https://feeds.reuters.com/reuters/businessNews,"
+        "https://rsshub.app/weibo/search/hot/财经,"
+        "https://rsshub.app/caixin/latest",
     )
 
 

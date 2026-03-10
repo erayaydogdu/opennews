@@ -16,12 +16,17 @@ from sentence_transformers import SentenceTransformer
 
 from opennews.agents.classifier_agent import ClassificationResult, ClassifierAgent
 from opennews.agents.feature_agent import FeatureAgent, FeatureVector
+from opennews.agents.memory_agent import MemoryAgent, TopicTrend
 from opennews.config import settings
 from opennews.graph.neo4j_client import GraphPayload, Neo4jGraphClient
+from opennews.graph.subgraph_query import GraphRAGQuerier
 from opennews.graph.upsert import build_graph_payload
 from opennews.ingest.checkpoint import CheckpointStore
-from opennews.ingest.news_fetcher import NewsItem, deduplicate_news, fetch_rss_news
+from opennews.ingest.news_fetcher import (
+    NewsItem, deduplicate_news, fetch_multi_platform, fetch_rss_news,
+)
 from opennews.ingest.seed_injector import RealtimeSeedInjector
+from opennews.memory import MemoryRecord, RedisMemoryStore
 from opennews.nlp.embedder import TextEmbedder
 from opennews.nlp.entity_extractor import EntityExtractor
 from opennews.topic.online_topic_model import OnlineTopicModel
@@ -37,6 +42,8 @@ class PipelineState(TypedDict, total=False):
     classifications: list[ClassificationResult]
     features: list[FeatureVector]
     payloads: list[GraphPayload]
+    # Step3: 时序记忆 & 趋势
+    topic_trends: dict[int, TopicTrend]
     result: str
 
 
@@ -57,6 +64,15 @@ class PipelineRuntime:
     feature_agent: FeatureAgent = field(
         default_factory=lambda: FeatureAgent(model_name=settings.classifier_model)
     )
+    # Step3: Memory Agent + GraphRAG Querier
+    memory_store: RedisMemoryStore = field(
+        default_factory=lambda: RedisMemoryStore(
+            redis_url=settings.redis_url,
+            window_days=settings.memory_window_days,
+        )
+    )
+    memory_agent: MemoryAgent = field(default=None)  # 延迟初始化
+    graphrag_querier: GraphRAGQuerier = field(default=None)  # 延迟初始化
     graph_client: Neo4jGraphClient = field(
         default_factory=lambda: Neo4jGraphClient(
             settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password
@@ -69,6 +85,9 @@ class PipelineRuntime:
 
 
 runtime = PipelineRuntime()
+# Step3: 延迟初始化依赖 runtime 自身的组件
+runtime.memory_agent = MemoryAgent(runtime.memory_store)
+runtime.graphrag_querier = GraphRAGQuerier(runtime.graph_client)
 
 
 def init_graph_schema() -> bool:
@@ -86,7 +105,8 @@ def fetch_news_node(state: PipelineState) -> PipelineState:
     sources = [s.strip() for s in settings.news_sources.split(",") if s.strip()]
     last_dt = runtime.checkpoint.load_last_published_at()
 
-    rss_batch = fetch_rss_news(sources=sources, limit=settings.batch_size, since=last_dt)
+    # Step3: 多平台并行抓取
+    rss_batch = fetch_multi_platform(sources=sources, limit=settings.batch_size, since=last_dt)
     seed_batch = runtime.seed_injector.load()
 
     batch = deduplicate_news(rss_batch + seed_batch)
@@ -263,23 +283,87 @@ def write_graph_node(state: PipelineState) -> PipelineState:
     return {"result": f"updated {len(payloads)} news into graph"}
 
 
+# ── Step3: Memory Agent 节点 ──────────────────────────────────
+def memory_ingest_node(state: PipelineState) -> PipelineState:
+    """将当前批次写入时序记忆（Redis / fallback）。"""
+    payloads = state.get("payloads", [])
+    if not payloads:
+        return {"topic_trends": {}}
+
+    records: list[MemoryRecord] = []
+    for p in payloads:
+        records.append(MemoryRecord(
+            news_id=p.news.get("news_id", ""),
+            topic_id=p.topic.get("topic_id", -1),
+            published_at=p.news.get("published_at", ""),
+            category=(p.classification or {}).get("category", "unknown"),
+            impact_score=(p.features or {}).get("impact_score", 0.0),
+            features=p.features or {},
+        ))
+
+    try:
+        runtime.memory_agent.ingest(records)
+    except Exception:
+        logger.exception("memory ingest failed")
+
+    # 聚合当前批次涉及的所有 topic
+    topic_ids = {r.topic_id for r in records}
+    try:
+        trends = runtime.memory_agent.aggregate_batch_topics(
+            topic_ids, window_days=settings.memory_window_days
+        )
+    except Exception:
+        logger.exception("memory aggregation failed")
+        trends = {}
+
+    return {"topic_trends": trends}
+
+
+# ── Step3: 趋势写入 GraphRAG 节点 ─────────────────────────────
+def update_trends_node(state: PipelineState) -> PipelineState:
+    """将累积影响趋势写入 Neo4j Topic 节点。"""
+    trends = state.get("topic_trends", {})
+    if not trends:
+        return {}
+
+    updated = 0
+    for topic_id, trend in trends.items():
+        trend_data = {
+            "trend_direction": trend.trend_direction,
+            "avg_impact": trend.avg_impact,
+            "latest_impact": trend.latest_impact,
+            "total_news_count": trend.total_news_count,
+        }
+        try:
+            if runtime.graphrag_querier.upsert_topic_trend(topic_id, trend_data):
+                updated += 1
+        except Exception:
+            logger.exception("trend upsert failed for topic %d", topic_id)
+
+    logger.info("updated trends for %d/%d topics", updated, len(trends))
+    return {}
+
+
 def build_pipeline():
     g = StateGraph(PipelineState)
     g.add_node("fetch_news", fetch_news_node)
     g.add_node("embed", embed_node)
     g.add_node("extract_entities", entity_node)
     g.add_node("topics", topic_node)
-    # Step2: 新增 Agent 节点
+    # Step2: Agent 节点
     g.add_node("classify", classify_node)
     g.add_node("extract_features", feature_node)
     g.add_node("build_payload", build_payload_node)
     g.add_node("dump_output", dump_output_node)
     g.add_node("write_graph", write_graph_node)
+    # Step3: 时序记忆 & 趋势
+    g.add_node("memory_ingest", memory_ingest_node)
+    g.add_node("update_trends", update_trends_node)
 
     g.set_entry_point("fetch_news")
     g.add_edge("fetch_news", "embed")
     g.add_edge("embed", "extract_entities")
-    # embed 之后并行分支：entities → topics / classify / features
+    # 并行分支：entities → topics / classify / features
     g.add_edge("extract_entities", "topics")
     g.add_edge("extract_entities", "classify")
     g.add_edge("extract_entities", "extract_features")
@@ -289,7 +373,10 @@ def build_pipeline():
     g.add_edge("extract_features", "build_payload")
     g.add_edge("build_payload", "dump_output")
     g.add_edge("dump_output", "write_graph")
-    g.add_edge("write_graph", END)
+    # Step3: write_graph → memory_ingest → update_trends → END
+    g.add_edge("write_graph", "memory_ingest")
+    g.add_edge("memory_ingest", "update_trends")
+    g.add_edge("update_trends", END)
     return g.compile()
 
 
