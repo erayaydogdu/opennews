@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 from langgraph.graph import END, StateGraph
 from sentence_transformers import SentenceTransformer
 
+from opennews.agents.classifier_agent import ClassificationResult, ClassifierAgent
+from opennews.agents.feature_agent import FeatureAgent, FeatureVector
 from opennews.config import settings
 from opennews.graph.neo4j_client import GraphPayload, Neo4jGraphClient
 from opennews.graph.upsert import build_graph_payload
@@ -31,6 +33,9 @@ class PipelineState(TypedDict, total=False):
     embeddings: list[list[float]]
     entities: list[list]
     topics: list
+    # Step2: 分类 & 特征
+    classifications: list[ClassificationResult]
+    features: list[FeatureVector]
     payloads: list[GraphPayload]
     result: str
 
@@ -41,6 +46,16 @@ class PipelineRuntime:
     extractor: EntityExtractor = field(default_factory=lambda: EntityExtractor(settings.ner_model))
     topic_model: OnlineTopicModel = field(
         default_factory=lambda: OnlineTopicModel(SentenceTransformer(settings.embedding_model))
+    )
+    # Step2: Classifier Agent & Feature Agent（复用同一个 NLI 模型）
+    classifier: ClassifierAgent = field(
+        default_factory=lambda: ClassifierAgent(
+            model_name=settings.classifier_model,
+            candidate_labels=[l.strip() for l in settings.classifier_labels.split(",") if l.strip()],
+        )
+    )
+    feature_agent: FeatureAgent = field(
+        default_factory=lambda: FeatureAgent(model_name=settings.classifier_model)
     )
     graph_client: Neo4jGraphClient = field(
         default_factory=lambda: Neo4jGraphClient(
@@ -108,11 +123,46 @@ def topic_node(state: PipelineState) -> PipelineState:
     return {"topics": topics}
 
 
+# ── Step2: Classifier Agent 节点 ──────────────────────────────
+def classify_node(state: PipelineState) -> PipelineState:
+    """零样本分类：金融/政策/公司事件等。"""
+    docs = state.get("docs", [])
+    if not docs:
+        return {"classifications": []}
+    try:
+        classifications = runtime.classifier.classify_batch(docs)
+    except Exception:
+        logger.exception("classify_node failed, fallback to empty")
+        from opennews.agents.classifier_agent import ClassificationResult
+        classifications = [
+            ClassificationResult(category="unknown", confidence=0.0, all_scores={})
+            for _ in docs
+        ]
+    return {"classifications": classifications}
+
+
+# ── Step2: Feature Agent 节点 ─────────────────────────────────
+def feature_node(state: PipelineState) -> PipelineState:
+    """7 维新闻价值特征提取 + 影响分。"""
+    docs = state.get("docs", [])
+    if not docs:
+        return {"features": []}
+    try:
+        features = runtime.feature_agent.extract_features_batch(docs)
+    except Exception:
+        logger.exception("feature_node failed, fallback to defaults")
+        from opennews.agents.feature_agent import FeatureVector
+        features = [FeatureVector() for _ in docs]
+    return {"features": features}
+
+
 def build_payload_node(state: PipelineState) -> PipelineState:
     news = state.get("news_batch", [])
     embeds = state.get("embeddings", [])
     entities = state.get("entities", [])
     topics = state.get("topics", [])
+    classifications = state.get("classifications", [])
+    features = state.get("features", [])
 
     if not news:
         return {"payloads": []}
@@ -130,7 +180,28 @@ def build_payload_node(state: PipelineState) -> PipelineState:
             topic=topic,
             topic_label=label,
         )
-        payloads.append(GraphPayload(**payload))
+        # Step2: 注入分类 & 特征到 payload
+        clf_dict = None
+        feat_dict = None
+        if i < len(classifications):
+            clf = classifications[i]
+            clf_dict = {
+                "category": clf.category,
+                "confidence": clf.confidence,
+                "all_scores": clf.all_scores,
+            }
+        if i < len(features):
+            feat = features[i]
+            feat_dict = feat.to_dict()
+
+        payloads.append(GraphPayload(
+            news=payload["news"],
+            entities=payload["entities"],
+            topic=payload["topic"],
+            impacts=payload["impacts"],
+            classification=clf_dict,
+            features=feat_dict,
+        ))
 
     return {"payloads": payloads}
 
@@ -159,6 +230,9 @@ def dump_output_node(state: PipelineState) -> PipelineState:
             "entities": p.entities,
             "topic": p.topic,
             "impacts": p.impacts,
+            # Step2: 分类 & 特征
+            "classification": p.classification,
+            "features": p.features,
         })
 
     out_file.write_text(
@@ -195,6 +269,9 @@ def build_pipeline():
     g.add_node("embed", embed_node)
     g.add_node("extract_entities", entity_node)
     g.add_node("topics", topic_node)
+    # Step2: 新增 Agent 节点
+    g.add_node("classify", classify_node)
+    g.add_node("extract_features", feature_node)
     g.add_node("build_payload", build_payload_node)
     g.add_node("dump_output", dump_output_node)
     g.add_node("write_graph", write_graph_node)
@@ -202,8 +279,14 @@ def build_pipeline():
     g.set_entry_point("fetch_news")
     g.add_edge("fetch_news", "embed")
     g.add_edge("embed", "extract_entities")
+    # embed 之后并行分支：entities → topics / classify / features
     g.add_edge("extract_entities", "topics")
+    g.add_edge("extract_entities", "classify")
+    g.add_edge("extract_entities", "extract_features")
+    # 三路汇聚到 build_payload
     g.add_edge("topics", "build_payload")
+    g.add_edge("classify", "build_payload")
+    g.add_edge("extract_features", "build_payload")
     g.add_edge("build_payload", "dump_output")
     g.add_edge("dump_output", "write_graph")
     g.add_edge("write_graph", END)

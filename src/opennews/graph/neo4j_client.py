@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -14,6 +15,9 @@ class GraphPayload:
     entities: list[dict]
     topic: dict
     impacts: list[dict]
+    # Step2: 分类 & 特征（可选）
+    classification: dict | None = None
+    features: dict | None = None
 
 
 class Neo4jGraphClient:
@@ -52,7 +56,9 @@ class Neo4jGraphClient:
                     MERGE (n:News {news_id: $news_id})
                     SET n.title=$title, n.content=$content, n.source=$source,
                         n.url=$url, n.published_at=$published_at,
-                        n.embedding=$embedding, n.updated_at=$now
+                        n.embedding=$embedding, n.updated_at=$now,
+                        n.category=$category, n.category_confidence=$category_confidence,
+                        n.impact_score=$impact_score, n.features=$features
                     MERGE (t:Topic {topic_id: $topic_id})
                     SET t.label=$topic_label, t.updated_at=$now
                     MERGE (n)-[r:IN_TOPIC]->(t)
@@ -69,6 +75,11 @@ class Neo4jGraphClient:
                         "topic_id": topic["topic_id"],
                         "topic_label": topic["label"],
                         "topic_prob": topic["probability"],
+                        # Step2: 分类 & 特征
+                        "category": (payload.classification or {}).get("category", "unknown"),
+                        "category_confidence": (payload.classification or {}).get("confidence", 0.0),
+                        "impact_score": (payload.features or {}).get("impact_score", 0.0),
+                        "features": json.dumps(payload.features) if payload.features else "{}",
                         "now": now,
                     },
                 )
