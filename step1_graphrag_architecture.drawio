@@ -1,0 +1,94 @@
+<mxfile host="app.diagrams.net" modified="2026-03-09T00:00:00.000Z" agent="Mozilla/5.0" version="24.7.17" type="device">
+  <diagram id="graph-step1" name="Step1-GraphRAG-Architecture">
+    <mxGraphModel dx="1482" dy="924" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1080" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="title" value="Step 1: 实时新闻图谱构建（GraphRAG + 实时种子注入）" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontStyle=1;fontSize=20;" vertex="1" parent="1">
+          <mxGeometry x="420" y="20" width="1080" height="40" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="src" value="新闻源&#xa;RSS / API / 爬虫" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="80" y="140" width="220" height="90" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="poll" value="轮询调度器&#xa;APScheduler / Cron&#xa;5~15 分钟" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="350" y="130" width="240" height="110" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="langgraph" value="LangGraph Orchestrator&#xa;fetch → dedup → embed → NER → topic → upsert" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="640" y="120" width="420" height="130" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="dedup" value="增量去重 / Checkpoint&#xa;url_hash + published_at" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="130" width="260" height="110" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="embed" value="嵌入模块&#xa;FinRoBERTa / DeBERTa&#xa;768-dim" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="260" y="340" width="260" height="110" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ner" value="实体抽取模块&#xa;NER + 金融词典后处理" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="560" y="340" width="260" height="110" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="topic" value="BERTopic Online&#xa;partial_fit 实时聚类" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="860" y="340" width="260" height="110" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="impact" value="影响权重计算&#xa;cosine similarity + time decay" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="340" width="300" height="110" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="neo4j" value="Neo4j 图数据库&#xa;节点: News / Entity / Topic&#xa;边: MENTIONS / IN_TOPIC / IMPACTS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cce5ff;strokeColor=#4d88ff;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="600" y="560" width="520" height="150" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="retrieval" value="GraphRAG 检索层&#xa;子图召回 + 语义增强" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="580" width="260" height="110" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="obs" value="监控与日志&#xa;批次耗时 / 失败重试 / 入图计数" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f8f8;strokeColor=#999999;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="80" y="560" width="430" height="150" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e1" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="src" target="poll">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e2" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="poll" target="langgraph">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e3" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="langgraph" target="dedup">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e4" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="dedup" target="embed">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e5" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="embed" target="ner">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e6" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="ner" target="topic">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e7" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="topic" target="impact">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e8" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="impact" target="neo4j">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e9" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="neo4j" target="retrieval">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e10" value="指标上报" style="dashed=1;endArrow=open;html=1;strokeColor=#999999;" edge="1" parent="1" source="langgraph" target="obs">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e11" value="状态回写" style="dashed=1;endArrow=open;html=1;strokeColor=#999999;" edge="1" parent="1" source="neo4j" target="obs">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
