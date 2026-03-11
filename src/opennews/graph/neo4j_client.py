@@ -18,6 +18,8 @@ class GraphPayload:
     # Step2: 分类 & 特征（可选）
     classification: dict | None = None
     features: dict | None = None
+    # Step4: 最终影响评分（可选）
+    report: dict | None = None
 
 
 class Neo4jGraphClient:
@@ -58,7 +60,9 @@ class Neo4jGraphClient:
                         n.url=$url, n.published_at=$published_at,
                         n.embedding=$embedding, n.updated_at=$now,
                         n.category=$category, n.category_confidence=$category_confidence,
-                        n.impact_score=$impact_score, n.features=$features
+                        n.impact_score=$impact_score, n.features=$features,
+                        n.final_impact_score=$final_impact_score,
+                        n.impact_level=$impact_level
                     MERGE (t:Topic {topic_id: $topic_id})
                     SET t.label=$topic_label, t.updated_at=$now
                     MERGE (n)-[r:IN_TOPIC]->(t)
@@ -80,6 +84,9 @@ class Neo4jGraphClient:
                         "category_confidence": (payload.classification or {}).get("confidence", 0.0),
                         "impact_score": (payload.features or {}).get("impact_score", 0.0),
                         "features": json.dumps(payload.features) if payload.features else "{}",
+                        # Step4: 最终影响评分
+                        "final_impact_score": (payload.report or {}).get("final_score", 0.0),
+                        "impact_level": (payload.report or {}).get("impact_level", ""),
                         "now": now,
                     },
                 )

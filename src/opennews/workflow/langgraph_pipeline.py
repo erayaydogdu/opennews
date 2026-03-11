@@ -17,6 +17,7 @@ from sentence_transformers import SentenceTransformer
 from opennews.agents.classifier_agent import ClassificationResult, ClassifierAgent
 from opennews.agents.feature_agent import FeatureAgent, FeatureVector
 from opennews.agents.memory_agent import MemoryAgent, TopicTrend
+from opennews.agents.report_agent import NewsReport, ReportAgent
 from opennews.config import settings
 from opennews.graph.neo4j_client import GraphPayload, Neo4jGraphClient
 from opennews.graph.subgraph_query import GraphRAGQuerier
@@ -44,6 +45,8 @@ class PipelineState(TypedDict, total=False):
     payloads: list[GraphPayload]
     # Step3: 时序记忆 & 趋势
     topic_trends: dict[int, TopicTrend]
+    # Step4: 影响评估报告
+    reports: list[NewsReport]
     result: str
 
 
@@ -73,6 +76,15 @@ class PipelineRuntime:
     )
     memory_agent: MemoryAgent = field(default=None)  # 延迟初始化
     graphrag_querier: GraphRAGQuerier = field(default=None)  # 延迟初始化
+    # Step4: ReportAgent
+    report_agent: ReportAgent = field(
+        default_factory=lambda: ReportAgent(
+            weight_stock=settings.report_weight_stock,
+            weight_sentiment=settings.report_weight_sentiment,
+            weight_policy=settings.report_weight_policy,
+            weight_spread=settings.report_weight_spread,
+        )
+    )
     graph_client: Neo4jGraphClient = field(
         default_factory=lambda: Neo4jGraphClient(
             settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password
@@ -253,6 +265,11 @@ def dump_output_node(state: PipelineState) -> PipelineState:
             # Step2: 分类 & 特征
             "classification": p.classification,
             "features": p.features,
+            # Step4: 报告摘要
+            "report": {
+                "final_score": (p.report or {}).get("final_score"),
+                "impact_level": (p.report or {}).get("impact_level"),
+            } if p.report else None,
         })
 
     out_file.write_text(
@@ -344,6 +361,85 @@ def update_trends_node(state: PipelineState) -> PipelineState:
     return {}
 
 
+# ── Step4: ReportAgent 节点 ───────────────────────────────────
+def report_node(state: PipelineState) -> PipelineState:
+    """DK-CoT 多维度评分 + Markdown 报告生成。可通过 REPORT_ENABLED 开关。"""
+    if not settings.report_enabled:
+        logger.info("report generation disabled, skipping")
+        return {"reports": []}
+
+    payloads = state.get("payloads", [])
+    trends = state.get("topic_trends", {})
+    if not payloads:
+        return {"reports": []}
+
+    # 构建 ReportAgent 所需的输入格式
+    eval_items = []
+    for p in payloads:
+        eval_items.append({
+            "news": p.news,
+            "features": p.features or {},
+            "classification": p.classification or {},
+            "entities": p.entities,
+            "topic": p.topic,
+        })
+
+    try:
+        reports = runtime.report_agent.evaluate_batch(eval_items, trends=trends)
+    except Exception:
+        logger.exception("report_node failed")
+        reports = []
+
+    # 将 report 数据回写到 payloads（用于后续持久化）
+    for i, report in enumerate(reports):
+        if i < len(payloads):
+            payloads[i] = GraphPayload(
+                news=payloads[i].news,
+                entities=payloads[i].entities,
+                topic=payloads[i].topic,
+                impacts=payloads[i].impacts,
+                classification=payloads[i].classification,
+                features=payloads[i].features,
+                report=report.to_dict(),
+            )
+
+    # 输出报告文件
+    if reports:
+        _dump_reports(reports)
+
+    return {"reports": reports, "payloads": payloads}
+
+
+def _dump_reports(reports: list[NewsReport]) -> None:
+    """将 Markdown 报告写入 output/reports/ 目录。"""
+    out_dir = Path("output/reports")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+    for i, r in enumerate(reports):
+        md_file = out_dir / f"report_{ts}_{i}_{r.impact_level}.md"
+        md_file.write_text(r.markdown, encoding="utf-8")
+
+    # 汇总 JSON
+    summary_file = out_dir / f"summary_{ts}.json"
+    import json as _json
+    summary = [
+        {
+            "news_id": r.news_id,
+            "final_score": r.final_score,
+            "impact_level": r.impact_level,
+            "dk_cot_scores": r.dk_cot_scores.to_dict(),
+            "viz_suggestions": r.viz_suggestions,
+        }
+        for r in reports
+    ]
+    summary_file.write_text(
+        _json.dumps(summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    logger.info("dumped %d reports to %s", len(reports), out_dir)
+
+
 def build_pipeline():
     g = StateGraph(PipelineState)
     g.add_node("fetch_news", fetch_news_node)
@@ -355,10 +451,12 @@ def build_pipeline():
     g.add_node("extract_features", feature_node)
     g.add_node("build_payload", build_payload_node)
     g.add_node("dump_output", dump_output_node)
-    g.add_node("write_graph", write_graph_node)
     # Step3: 时序记忆 & 趋势
     g.add_node("memory_ingest", memory_ingest_node)
     g.add_node("update_trends", update_trends_node)
+    # Step4: 报告生成 + 图谱写入
+    g.add_node("report", report_node)
+    g.add_node("write_graph", write_graph_node)
 
     g.set_entry_point("fetch_news")
     g.add_edge("fetch_news", "embed")
@@ -372,11 +470,13 @@ def build_pipeline():
     g.add_edge("classify", "build_payload")
     g.add_edge("extract_features", "build_payload")
     g.add_edge("build_payload", "dump_output")
-    g.add_edge("dump_output", "write_graph")
-    # Step3: write_graph → memory_ingest → update_trends → END
-    g.add_edge("write_graph", "memory_ingest")
+    # Step3: 时序记忆聚合
+    g.add_edge("dump_output", "memory_ingest")
     g.add_edge("memory_ingest", "update_trends")
-    g.add_edge("update_trends", END)
+    # Step4: report 需要 trends → 然后 write_graph 持久化 report 数据
+    g.add_edge("update_trends", "report")
+    g.add_edge("report", "write_graph")
+    g.add_edge("write_graph", END)
     return g.compile()
 
 

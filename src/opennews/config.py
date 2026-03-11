@@ -27,6 +27,14 @@ class Settings:
     redis_url: str = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
     memory_window_days: int = int(os.getenv("MEMORY_WINDOW_DAYS", "30"))
 
+    # Step4: ReportAgent 配置
+    report_enabled: bool = os.getenv("REPORT_ENABLED", "true").lower() in ("true", "1", "yes")
+    # DK-CoT 四维权重：股价相关性 / 市场情绪 / 政策风险 / 传播广度
+    report_weight_stock: float = float(os.getenv("REPORT_WEIGHT_STOCK", "0.40"))
+    report_weight_sentiment: float = float(os.getenv("REPORT_WEIGHT_SENTIMENT", "0.20"))
+    report_weight_policy: float = float(os.getenv("REPORT_WEIGHT_POLICY", "0.20"))
+    report_weight_spread: float = float(os.getenv("REPORT_WEIGHT_SPREAD", "0.20"))
+
     checkpoint_file: str = os.getenv("CHECKPOINT_FILE", "seeds/checkpoint.json")
     news_sources: str = os.getenv(
         "NEWS_SOURCES",
