@@ -445,7 +445,9 @@ function renderNewsItem(item) {
 }
 
 function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function escAttr(s) { return s.replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+function escAttr(s) { return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+const isValidUrl = (url) => url && (url.startsWith('http://') || url.startsWith('https://'));
 
 // ── topic toggle ─────────────────────────────────────────
 window.toggleTopic = function(tid) {
@@ -581,7 +583,7 @@ window.showDetail = function(nid) {
     <div class="d-section">
       <div class="d-section-title">原文摘要</div>
       <p style="font-size:13px;line-height:1.7;color:var(--text)">${escHtml(news.content || '—')}</p>
-      ${news.url ? `<a href="${escAttr(news.url)}" target="_blank" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);margin-top:8px;display:inline-block">查看原文 →</a>` : ''}
+      ${isValidUrl(news.url) ? `<a href="${escAttr(news.url)}" target="_blank" rel="noopener noreferrer" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);margin-top:8px;display:inline-block">查看原文 →</a>` : ''}
     </div>
   `;
 
