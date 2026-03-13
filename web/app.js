@@ -63,38 +63,142 @@ const catColor = {
   industry_trend:    '#10b981',
 };
 
-const sourceName = (url) => {
-  if (!url) return '—';
-  if (url.includes('reuters')) return 'Reuters';
-  if (url.includes('weibo'))   return '微博';
-  if (url.includes('caixin'))  return '财新';
-  if (url.includes('seed'))    return 'Seed';
-  return 'RSS';
+const sourceName = (src) => {
+  if (!src) return '—';
+  if (src.includes('wallstreetcn')) return '华尔街见闻';
+  if (src.includes('cls'))     return '财联社';
+  if (src.includes('caixin'))  return '财新';
+  if (src.includes('reuters')) return 'Reuters';
+  if (src.includes('weibo'))   return '微博';
+  if (src.includes('seed'))    return 'Seed';
+  return src;
 };
 
 const fmtTime = (iso) => {
   if (!iso) return '';
   const d = new Date(iso);
-  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
 };
 
+// 将 UTC 时间戳 YYYYMMDD_HHMMSS 转为本地时间显示
+const fmtBatchTs = (ts) => {
+  const m = ts.match(/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
+  if (!m) return ts;
+  const utcDate = new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]));
+  return utcDate.toLocaleString('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
+};
+
+// ── auto-refresh ─────────────────────────────────────────
+let autoRefreshTimer = null;
+const AUTO_REFRESH_INTERVAL = 30_000; // 30 秒
+
 // ── data loading ─────────────────────────────────────────
-async function loadMock() {
-  const resp = await fetch('mock/batch_20260309_140000.json');
-  return resp.json();
+
+async function fetchBatchList() {
+  try {
+    const resp = await fetch('/api/batches');
+    if (!resp.ok) return [];
+    return resp.json();
+  } catch { return []; }
 }
 
 async function loadData(source) {
   let data;
-  if (source === 'mock') {
-    data = await loadMock();
+  if (source === 'latest') {
+    try {
+      const resp = await fetch('/api/batches/latest');
+      if (!resp.ok) throw new Error('no data');
+      data = await resp.json();
+    } catch {
+      allItems = [];
+      filteredItems = [];
+      updateStats();
+      drawChart();
+      $topicList.innerHTML = '<div class="topics-loading">暂无数据 — 请先运行后端流水线产出批次数据</div>';
+      return;
+    }
+  } else if (source.startsWith('batch:')) {
+    const id = source.slice(6);
+    const resp = await fetch(`/api/batches/${id}`);
+    data = await resp.json();
   } else {
     data = await (await fetch(source)).json();
   }
+  if (!Array.isArray(data) || data.length === 0) {
+    allItems = [];
+    filteredItems = [];
+    updateStats();
+    drawChart();
+    $topicList.innerHTML = '<div class="topics-loading">该批次无数据</div>';
+    return;
+  }
   allItems = data.filter(d => d.news && d.report);
+  if (allItems.length === 0) {
+    filteredItems = [];
+    updateStats();
+    drawChart();
+    $topicList.innerHTML = '<div class="topics-loading">该批次数据中无有效记录（缺少 news 或 report 字段）</div>';
+    return;
+  }
   rangeLo = 0;
   rangeHi = 100;
   applyFilter();
+}
+
+async function refreshBatchSelect() {
+  const $sel = document.getElementById('sourceSelect');
+  const batches = await fetchBatchList();
+
+  const curVal = $sel.value;
+
+  $sel.innerHTML = '';
+
+  // 固定选项：最新批次
+  const optLatest = document.createElement('option');
+  optLatest.value = 'latest';
+  optLatest.textContent = '最新批次 (自动刷新)';
+  $sel.appendChild(optLatest);
+
+  // 动态批次列表
+  batches.forEach(b => {
+    const opt = document.createElement('option');
+    opt.value = `batch:${b.batch_id}`;
+    opt.textContent = `${fmtBatchTs(b.batch_ts)} (${b.record_count} 条)`;
+    $sel.appendChild(opt);
+  });
+
+  if ([...($sel.options)].some(o => o.value === curVal)) {
+    $sel.value = curVal;
+  } else {
+    $sel.value = 'latest';
+  }
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  autoRefreshTimer = setInterval(async () => {
+    const $sel = document.getElementById('sourceSelect');
+    if ($sel.value === 'latest') {
+      await loadData('latest');
+      await refreshBatchSelect();
+    }
+  }, AUTO_REFRESH_INTERVAL);
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
 }
 
 function applyFilter() {
@@ -505,9 +609,18 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ── source bar ───────────────────────────────────────────
+document.getElementById('sourceSelect').addEventListener('change', () => {
+  const src = document.getElementById('sourceSelect').value;
+  loadData(src);
+  if (src === 'latest') startAutoRefresh();
+  else stopAutoRefresh();
+});
+
 document.getElementById('sourceLoad').addEventListener('click', () => {
   const src = document.getElementById('sourceSelect').value;
   loadData(src);
+  if (src === 'latest') startAutoRefresh();
+  else stopAutoRefresh();
 });
 
 document.getElementById('fileBtn').addEventListener('click', () => {
@@ -536,4 +649,10 @@ window.addEventListener('resize', () => { drawChart(); });
 
 // ── init ─────────────────────────────────────────────────
 initRangeSlider();
-loadData('mock');
+
+(async () => {
+  await refreshBatchSelect();
+  document.getElementById('sourceSelect').value = 'latest';
+  await loadData('latest');
+  startAutoRefresh();
+})();

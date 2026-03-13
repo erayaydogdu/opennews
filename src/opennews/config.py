@@ -35,13 +35,22 @@ class Settings:
     report_weight_policy: float = float(os.getenv("REPORT_WEIGHT_POLICY", "0.20"))
     report_weight_spread: float = float(os.getenv("REPORT_WEIGHT_SPREAD", "0.20"))
 
+    # PostgreSQL 持久化
+    pg_host: str = os.getenv("PG_HOST", "127.0.0.1")
+    pg_port: int = int(os.getenv("PG_PORT", "5432"))
+    pg_user: str = os.getenv("PG_USER", "postgres")
+    pg_password: str = os.getenv("PG_PASSWORD", "123456")
+    pg_database: str = os.getenv("PG_DATABASE", "opennews")
+
     checkpoint_file: str = os.getenv("CHECKPOINT_FILE", "seeds/checkpoint.json")
-    news_sources: str = os.getenv(
-        "NEWS_SOURCES",
-        # Step3: 多平台新闻源（逗号分隔）
-        "https://feeds.reuters.com/reuters/businessNews,"
-        "https://rsshub.app/weibo/search/hot/财经,"
-        "https://rsshub.app/caixin/latest",
+    # NewsNow API 配置
+    newsnow_api_url: str = os.getenv(
+        "NEWSNOW_API_URL",
+        "https://newsnow.busiyi.world/api/s/entire",
+    )
+    newsnow_sources: str = os.getenv(
+        "NEWSNOW_SOURCES",
+        "wallstreetcn-news",
     )
 
 

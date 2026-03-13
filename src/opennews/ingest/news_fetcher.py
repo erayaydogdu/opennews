@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable
 
-import feedparser
-from dateutil import parser as dt_parser
+import requests
 
 logger = logging.getLogger(__name__)
+
+_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
 
 
 @dataclass(slots=True)
@@ -28,46 +30,6 @@ def _make_news_id(url: str, published_at: datetime) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
 
-def fetch_rss_news(
-    sources: Iterable[str], limit: int = 100, since: datetime | None = None
-) -> list[NewsItem]:
-    items: list[NewsItem] = []
-    for source in sources:
-        feed = feedparser.parse(source)
-        for entry in feed.entries[:limit]:
-            title = getattr(entry, "title", "").strip()
-            summary = getattr(entry, "summary", "").strip()
-            link = getattr(entry, "link", "").strip()
-            published_raw = getattr(entry, "published", None) or getattr(
-                entry, "updated", None
-            )
-            if not title or not link:
-                continue
-            try:
-                published_at = (
-                    dt_parser.parse(published_raw).astimezone(timezone.utc)
-                    if published_raw
-                    else datetime.now(timezone.utc)
-                )
-            except Exception:
-                published_at = datetime.now(timezone.utc)
-
-            if since and published_at <= since:
-                continue
-
-            items.append(
-                NewsItem(
-                    news_id=_make_news_id(link, published_at),
-                    title=title,
-                    content=summary or title,
-                    source=source,
-                    url=link,
-                    published_at=published_at,
-                )
-            )
-    return items
-
-
 def deduplicate_news(items: list[NewsItem]) -> list[NewsItem]:
     seen: set[str] = set()
     result: list[NewsItem] = []
@@ -80,57 +42,66 @@ def deduplicate_news(items: list[NewsItem]) -> list[NewsItem]:
     return result
 
 
-# ── Step3: 多平台并行抓取 ─────────────────────────────────────
+# ── NewsNow API 抓取 ──────────────────────────────────────────
 
-def _detect_platform(source: str) -> str:
-    """根据 URL 识别平台名。"""
-    if "reuters" in source:
-        return "reuters"
-    if "weibo" in source:
-        return "weibo"
-    if "caixin" in source:
-        return "caixin"
-    if "sina" in source:
-        return "sina"
-    return "rss"
-
-
-def _fetch_single_source(
-    source: str, limit: int, since: datetime | None
-) -> list[NewsItem]:
-    """抓取单个源（线程安全）。"""
-    platform = _detect_platform(source)
-    try:
-        items = fetch_rss_news([source], limit=limit, since=since)
-        logger.info("fetched %d items from %s (%s)", len(items), platform, source[:60])
-        return items
-    except Exception:
-        logger.exception("failed to fetch from %s (%s)", platform, source[:60])
-        return []
-
-
-def fetch_multi_platform(
+def fetch_newsnow(
+    api_url: str,
     sources: list[str],
     limit: int = 100,
     since: datetime | None = None,
-    max_workers: int = 4,
+    timeout: int = 30,
 ) -> list[NewsItem]:
-    """并行抓取多平台新闻源。
+    """从 NewsNow 格式接口批量抓取新闻。
 
-    Step3: 支持微博 + 财新 + Reuters 等多源并行。
+    API 请求：POST api_url  body: {"sources": [...]}
+    API 响应：[{id, status, items: [{id, title, url, extra: {date: ms_timestamp}}]}]
     """
-    all_items: list[NewsItem] = []
-    with ThreadPoolExecutor(max_workers=min(max_workers, len(sources))) as pool:
-        futures = {
-            pool.submit(_fetch_single_source, src, limit, since): src
-            for src in sources
-        }
-        for future in as_completed(futures):
-            try:
-                items = future.result(timeout=30)
-                all_items.extend(items)
-            except Exception:
-                src = futures[future]
-                logger.exception("timeout/error fetching %s", src[:60])
+    items: list[NewsItem] = []
 
-    return deduplicate_news(all_items)
+    try:
+        resp = requests.post(
+            api_url,
+            json={"sources": sources},
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": _USER_AGENT,
+            },
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        logger.exception("NewsNow API request failed: %s", api_url)
+        return []
+
+    for source_block in data:
+        source_id = source_block.get("id", "unknown")
+        for entry in source_block.get("items", [])[:limit]:
+            title = (entry.get("title") or "").strip()
+            url = (entry.get("url") or "").strip()
+            if not title or not url:
+                continue
+
+            # extra.date 是毫秒时间戳
+            date_ms = (entry.get("extra") or {}).get("date")
+            if date_ms:
+                published_at = datetime.fromtimestamp(date_ms / 1000, tz=timezone.utc)
+            else:
+                published_at = datetime.now(timezone.utc)
+
+            if since and published_at <= since:
+                continue
+
+            items.append(NewsItem(
+                news_id=_make_news_id(url, published_at),
+                title=title,
+                content=title,  # NewsNow 接口不返回正文，用标题代替
+                source=source_id,
+                url=url,
+                published_at=published_at,
+            ))
+
+        fetched = len([i for i in items if i.source == source_id])
+        logger.info("fetched %d items from %s", fetched, source_id)
+
+    return deduplicate_news(items)

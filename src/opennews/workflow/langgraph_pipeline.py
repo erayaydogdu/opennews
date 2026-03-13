@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TypedDict
 
 from neo4j.exceptions import Neo4jError, ServiceUnavailable
@@ -19,12 +17,13 @@ from opennews.agents.feature_agent import FeatureAgent, FeatureVector
 from opennews.agents.memory_agent import MemoryAgent, TopicTrend
 from opennews.agents.report_agent import NewsReport, ReportAgent
 from opennews.config import settings
+from opennews.db import ensure_schema as ensure_pg_schema, insert_batch, insert_reports
 from opennews.graph.neo4j_client import GraphPayload, Neo4jGraphClient
 from opennews.graph.subgraph_query import GraphRAGQuerier
 from opennews.graph.upsert import build_graph_payload
 from opennews.ingest.checkpoint import CheckpointStore
 from opennews.ingest.news_fetcher import (
-    NewsItem, deduplicate_news, fetch_multi_platform, fetch_rss_news,
+    NewsItem, deduplicate_news, fetch_newsnow,
 )
 from opennews.ingest.seed_injector import RealtimeSeedInjector
 from opennews.memory import MemoryRecord, RedisMemoryStore
@@ -114,14 +113,19 @@ def init_graph_schema() -> bool:
 
 
 def fetch_news_node(state: PipelineState) -> PipelineState:
-    sources = [s.strip() for s in settings.news_sources.split(",") if s.strip()]
+    sources = [s.strip() for s in settings.newsnow_sources.split(",") if s.strip()]
     last_dt = runtime.checkpoint.load_last_published_at()
 
-    # Step3: 多平台并行抓取
-    rss_batch = fetch_multi_platform(sources=sources, limit=settings.batch_size, since=last_dt)
+    # 从 NewsNow API 抓取
+    news_batch = fetch_newsnow(
+        api_url=settings.newsnow_api_url,
+        sources=sources,
+        limit=settings.batch_size,
+        since=last_dt,
+    )
     seed_batch = runtime.seed_injector.load()
 
-    batch = deduplicate_news(rss_batch + seed_batch)
+    batch = deduplicate_news(news_batch + seed_batch)
     if last_dt:
         batch = [b for b in batch if b.published_at > last_dt]
 
@@ -239,20 +243,18 @@ def build_payload_node(state: PipelineState) -> PipelineState:
 
 
 def dump_output_node(state: PipelineState) -> PipelineState:
-    """每轮把解析结果写到 output/ 目录，方便本地查看。"""
+    """每轮把解析结果（含 report）写入 PostgreSQL。"""
     payloads = state.get("payloads", [])
+    reports = state.get("reports", [])
     if not payloads:
         return {}
 
-    out_dir = Path("output")
-    out_dir.mkdir(exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    out_file = out_dir / f"batch_{ts}.json"
 
     records = []
     for p in payloads:
         news = p.news.copy()
-        # embedding 只保留前 8 维，避免文件过大
+        # embedding 只保留前 8 维，避免数据过大
         emb = news.get("embedding", [])
         news["embedding_preview"] = emb[:8]
         news.pop("embedding", None)
@@ -262,21 +264,33 @@ def dump_output_node(state: PipelineState) -> PipelineState:
             "entities": p.entities,
             "topic": p.topic,
             "impacts": p.impacts,
-            # Step2: 分类 & 特征
             "classification": p.classification,
             "features": p.features,
-            # Step4: 报告摘要
-            "report": {
-                "final_score": (p.report or {}).get("final_score"),
-                "impact_level": (p.report or {}).get("impact_level"),
-            } if p.report else None,
+            "report": p.report if p.report else None,
         })
 
-    out_file.write_text(
-        json.dumps(records, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    logger.info("dumped %d records to %s", len(records), out_file)
+    try:
+        ensure_pg_schema()
+        batch_id = insert_batch(ts, records)
+        logger.info("dumped %d records to PostgreSQL (batch_id=%d, ts=%s)", len(records), batch_id, ts)
+
+        # 写入 reports 表
+        if reports:
+            reports_data = [
+                {
+                    "news_id": r.news_id,
+                    "final_score": r.final_score,
+                    "impact_level": r.impact_level,
+                    "dk_cot_scores": r.dk_cot_scores.to_dict(),
+                    "markdown": r.markdown,
+                    "viz_suggestions": r.viz_suggestions,
+                }
+                for r in reports
+            ]
+            insert_reports(batch_id, reports_data)
+    except Exception:
+        logger.exception("failed to dump batch to PostgreSQL")
+
     return {}
 
 
@@ -403,41 +417,7 @@ def report_node(state: PipelineState) -> PipelineState:
                 report=report.to_dict(),
             )
 
-    # 输出报告文件
-    if reports:
-        _dump_reports(reports)
-
     return {"reports": reports, "payloads": payloads}
-
-
-def _dump_reports(reports: list[NewsReport]) -> None:
-    """将 Markdown 报告写入 output/reports/ 目录。"""
-    out_dir = Path("output/reports")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-
-    for i, r in enumerate(reports):
-        md_file = out_dir / f"report_{ts}_{i}_{r.impact_level}.md"
-        md_file.write_text(r.markdown, encoding="utf-8")
-
-    # 汇总 JSON
-    summary_file = out_dir / f"summary_{ts}.json"
-    import json as _json
-    summary = [
-        {
-            "news_id": r.news_id,
-            "final_score": r.final_score,
-            "impact_level": r.impact_level,
-            "dk_cot_scores": r.dk_cot_scores.to_dict(),
-            "viz_suggestions": r.viz_suggestions,
-        }
-        for r in reports
-    ]
-    summary_file.write_text(
-        _json.dumps(summary, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    logger.info("dumped %d reports to %s", len(reports), out_dir)
 
 
 def build_pipeline():
@@ -469,13 +449,13 @@ def build_pipeline():
     g.add_edge("topics", "build_payload")
     g.add_edge("classify", "build_payload")
     g.add_edge("extract_features", "build_payload")
-    g.add_edge("build_payload", "dump_output")
+    g.add_edge("build_payload", "memory_ingest")
     # Step3: 时序记忆聚合
-    g.add_edge("dump_output", "memory_ingest")
     g.add_edge("memory_ingest", "update_trends")
-    # Step4: report 需要 trends → 然后 write_graph 持久化 report 数据
+    # Step4: report 需要 trends → dump_output 在 report 之后写入 PG（含完整 report）
     g.add_edge("update_trends", "report")
-    g.add_edge("report", "write_graph")
+    g.add_edge("report", "dump_output")
+    g.add_edge("dump_output", "write_graph")
     g.add_edge("write_graph", END)
     return g.compile()
 
