@@ -10,7 +10,6 @@ from neo4j.exceptions import Neo4jError, ServiceUnavailable
 logger = logging.getLogger(__name__)
 
 from langgraph.graph import END, StateGraph
-from sentence_transformers import SentenceTransformer
 
 from opennews.agents.classifier_agent import ClassificationResult, ClassifierAgent
 from opennews.agents.feature_agent import FeatureAgent, FeatureVector
@@ -54,7 +53,7 @@ class PipelineRuntime:
     embedder: TextEmbedder = field(default_factory=lambda: TextEmbedder(settings.embedding_model))
     extractor: EntityExtractor = field(default_factory=lambda: EntityExtractor(settings.ner_model))
     topic_model: OnlineTopicModel = field(
-        default_factory=lambda: OnlineTopicModel(SentenceTransformer(settings.embedding_model))
+        default_factory=OnlineTopicModel
     )
     # Step2: Classifier Agent & Feature Agent（复用同一个 NLI 模型）
     classifier: ClassifierAgent = field(
@@ -153,9 +152,10 @@ def entity_node(state: PipelineState) -> PipelineState:
 
 def topic_node(state: PipelineState) -> PipelineState:
     docs = state.get("docs", [])
+    embeddings = state.get("embeddings", [])
     if not docs:
         return {"topics": []}
-    topics = runtime.topic_model.update_and_assign(docs)
+    topics = runtime.topic_model.update_and_assign(docs, embeddings=embeddings or None)
     return {"topics": topics}
 
 
