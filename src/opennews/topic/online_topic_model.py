@@ -12,13 +12,13 @@ logger = logging.getLogger(__name__)
 
 # 完全链接层次聚类的距离阈值
 # 距离 = 1 - cosine_similarity，阈值 0.50 意味着簇内任意两篇相似度 >= 0.50
-DISTANCE_THRESHOLD = 0.40
+DISTANCE_THRESHOLD = 0.55
 
 # 至少 2 篇才算聚合主题
 MIN_CLUSTER_SIZE = 2
 
 # 中文 embedding 模型
-_CHINESE_EMBED_MODEL = "shibing624/text2vec-base-chinese"
+_CHINESE_EMBED_MODEL = "BAAI/bge-base-zh-v1.5"
 
 
 @dataclass(slots=True)

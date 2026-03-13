@@ -2,6 +2,34 @@
    OpenNews Impact Terminal — app.js
    ═══════════════════════════════════════════════════════════ */
 
+// ── theme toggle ──────────────────────────────────────────
+const $themeToggle = document.getElementById('themeToggle');
+
+function setTheme(light) {
+  if (light) {
+    document.documentElement.setAttribute('data-theme', 'light');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+  $themeToggle.textContent = light ? '☀️' : '🌙';
+  localStorage.setItem('theme', light ? 'light' : 'dark');
+}
+
+// init: localStorage > system preference > dark
+{
+  const saved = localStorage.getItem('theme');
+  if (saved) {
+    setTheme(saved === 'light');
+  } else {
+    setTheme(window.matchMedia('(prefers-color-scheme: light)').matches);
+  }
+}
+
+$themeToggle.addEventListener('click', () => {
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  setTheme(!isLight);
+});
+
 // ── state ────────────────────────────────────────────────
 let allItems = [];          // raw batch items
 let filteredItems = [];     // after range filter
