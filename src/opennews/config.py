@@ -14,7 +14,7 @@ class Settings:
 
     neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687")
     neo4j_user: str = os.getenv("NEO4J_USER", "neo4j")
-    neo4j_password: str = os.getenv("NEO4J_PASSWORD", "neo4j")
+    neo4j_password: str = os.getenv("NEO4J_PASSWORD", "Aa123456")
 
     # Step2: 分类 & 特征提取
     classifier_model: str = os.getenv("CLASSIFIER_MODEL", "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli")
