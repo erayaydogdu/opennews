@@ -113,60 +113,41 @@ const fmtTime = (iso) => {
   });
 };
 
-// 将 UTC 时间戳 YYYYMMDD_HHMMSS 转为本地时间显示
-const fmtBatchTs = (ts) => {
-  const m = ts.match(/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
-  if (!m) return ts;
-  const utcDate = new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]));
-  return utcDate.toLocaleString('zh-CN', {
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-  });
-};
-
 // ── auto-refresh ─────────────────────────────────────────
 let autoRefreshTimer = null;
 const AUTO_REFRESH_INTERVAL = 30_000; // 30 秒
 
 // ── data loading ─────────────────────────────────────────
 
-async function fetchBatchList() {
-  try {
-    const resp = await fetch('/api/batches');
-    if (!resp.ok) return [];
-    return resp.json();
-  } catch { return []; }
-}
-
 async function loadData(source, { preserveState = false } = {}) {
   let data;
-  if (source === 'latest') {
-    try {
-      const resp = await fetch('/api/batches/latest');
-      if (!resp.ok) throw new Error('no data');
-      data = await resp.json();
-    } catch {
-      allItems = [];
-      filteredItems = [];
-      updateStats();
-      drawChart();
-      $topicList.innerHTML = '<div class="topics-loading">暂无数据 — 请先运行后端流水线产出批次数据</div>';
-      return;
+  try {
+    let url;
+    if (source.startsWith('hours:')) {
+      const h = source.slice(6);
+      url = `/api/records?hours=${h}`;
+    } else if (source.startsWith('batch:')) {
+      url = `/api/batches/${source.slice(6)}`;
+    } else {
+      url = source;
     }
-  } else if (source.startsWith('batch:')) {
-    const id = source.slice(6);
-    const resp = await fetch(`/api/batches/${id}`);
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('no data');
     data = await resp.json();
-  } else {
-    data = await (await fetch(source)).json();
+  } catch {
+    allItems = [];
+    filteredItems = [];
+    updateStats();
+    drawChart();
+    $topicList.innerHTML = '<div class="topics-loading">暂无数据 — 请先运行后端流水线产出批次数据</div>';
+    return;
   }
   if (!Array.isArray(data) || data.length === 0) {
     allItems = [];
     filteredItems = [];
     updateStats();
     drawChart();
-    $topicList.innerHTML = '<div class="topics-loading">该批次无数据</div>';
+    $topicList.innerHTML = '<div class="topics-loading">所选时间范围内无数据</div>';
     return;
   }
   allItems = data.filter(d => d.news && d.report);
@@ -174,7 +155,7 @@ async function loadData(source, { preserveState = false } = {}) {
     filteredItems = [];
     updateStats();
     drawChart();
-    $topicList.innerHTML = '<div class="topics-loading">该批次数据中无有效记录（缺少 news 或 report 字段）</div>';
+    $topicList.innerHTML = '<div class="topics-loading">所选时间范围内无有效记录</div>';
     return;
   }
 
@@ -193,43 +174,11 @@ async function loadData(source, { preserveState = false } = {}) {
   }
 }
 
-async function refreshBatchSelect() {
-  const $sel = document.getElementById('sourceSelect');
-  const batches = await fetchBatchList();
-
-  const curVal = $sel.value;
-
-  $sel.innerHTML = '';
-
-  // 固定选项：最新批次
-  const optLatest = document.createElement('option');
-  optLatest.value = 'latest';
-  optLatest.textContent = '最新批次 (自动刷新)';
-  $sel.appendChild(optLatest);
-
-  // 动态批次列表
-  batches.forEach(b => {
-    const opt = document.createElement('option');
-    opt.value = `batch:${b.batch_id}`;
-    opt.textContent = `${fmtBatchTs(b.batch_ts)} (${b.record_count} 条)`;
-    $sel.appendChild(opt);
-  });
-
-  if ([...($sel.options)].some(o => o.value === curVal)) {
-    $sel.value = curVal;
-  } else {
-    $sel.value = 'latest';
-  }
-}
-
 function startAutoRefresh() {
   stopAutoRefresh();
   autoRefreshTimer = setInterval(async () => {
-    const $sel = document.getElementById('sourceSelect');
-    if ($sel.value === 'latest') {
-      await loadData('latest', { preserveState: true });
-      await refreshBatchSelect();
-    }
+    const src = document.getElementById('sourceSelect').value;
+    await loadData(src, { preserveState: true });
   }, AUTO_REFRESH_INTERVAL);
 }
 
@@ -671,15 +620,13 @@ document.addEventListener('keydown', (e) => {
 document.getElementById('sourceSelect').addEventListener('change', () => {
   const src = document.getElementById('sourceSelect').value;
   loadData(src);
-  if (src === 'latest') startAutoRefresh();
-  else stopAutoRefresh();
+  startAutoRefresh();
 });
 
 document.getElementById('sourceLoad').addEventListener('click', () => {
   const src = document.getElementById('sourceSelect').value;
   loadData(src);
-  if (src === 'latest') startAutoRefresh();
-  else stopAutoRefresh();
+  startAutoRefresh();
 });
 
 document.getElementById('fileBtn').addEventListener('click', () => {
@@ -710,8 +657,7 @@ window.addEventListener('resize', () => { drawChart(); });
 initRangeSlider();
 
 (async () => {
-  await refreshBatchSelect();
-  document.getElementById('sourceSelect').value = 'latest';
-  await loadData('latest');
+  const $sel = document.getElementById('sourceSelect');
+  await loadData($sel.value);
   startAutoRefresh();
 })();

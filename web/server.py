@@ -52,6 +52,8 @@ class OpenNewsHandler(SimpleHTTPRequestHandler):
         elif self.path.startswith("/api/batches/"):
             raw = self.path[len("/api/batches/"):]
             self._handle_read(raw)
+        elif self.path.startswith("/api/records"):
+            self._handle_records()
         else:
             super().do_GET()
 
@@ -100,6 +102,22 @@ class OpenNewsHandler(SimpleHTTPRequestHandler):
             self._json_response(records)
         except Exception as e:
             logger.exception("get batch %d failed", batch_id)
+            self._json_error(str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _handle_records(self):
+        """GET /api/records?hours=N — 获取最近 N 小时内的所有记录。"""
+        from urllib.parse import parse_qs, urlparse
+        qs = parse_qs(urlparse(self.path).query)
+        try:
+            hours = float(qs.get("hours", ["24"])[0])
+        except (ValueError, IndexError):
+            hours = 24.0
+        try:
+            db = _db()
+            records = db.get_records_since(hours)
+            self._json_response(records)
+        except Exception as e:
+            logger.exception("get records since %s hours failed", hours)
             self._json_error(str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
 
     # ── 响应工具 ──────────────────────────────────────────

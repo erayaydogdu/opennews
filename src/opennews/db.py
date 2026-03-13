@@ -181,3 +181,17 @@ def get_batch_id_by_ts(batch_ts: str) -> int | None:
             cur.execute("SELECT batch_id FROM batches WHERE batch_ts = %s", (batch_ts,))
             row = cur.fetchone()
             return row[0] if row else None
+
+
+def get_records_since(hours: float) -> list[dict]:
+    """获取最近 N 小时内所有批次的记录（跨批次合并，按发布时间倒序）。"""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT br.payload FROM batch_records br "
+                "JOIN batches b ON br.batch_id = b.batch_id "
+                "WHERE b.created_at >= now() - interval '%s hours' "
+                "ORDER BY br.id DESC",
+                (hours,),
+            )
+            return [row[0] for row in cur.fetchall()]
