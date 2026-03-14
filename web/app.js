@@ -224,69 +224,89 @@ function drawChart() {
   const H = rect.height;
   ctx.clearRect(0, 0, W, H);
 
-  // bucket scores into 20 bins (0-5, 5-10, ..., 95-100)
-  const bins = new Array(20).fill(0);
+  // bucket scores into 10 bins (0-10, 10-20, ..., 90-100)
+  const bins = new Array(10).fill(0);
   allItems.forEach(d => {
     const s = d.report?.final_score ?? 0;
-    const idx = Math.min(19, Math.floor(s / 5));
+    const idx = Math.min(9, Math.floor(s / 10));
     bins[idx]++;
   });
   const maxBin = Math.max(...bins, 1);
 
-  const padL = 4, padR = 4, padT = 16, padB = 4;
+  const padL = 36, padR = 12, padT = 20, padB = 24;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
+  const barCount = 10;
+  const barGap = 6;
+  const barW = (plotW - barGap * (barCount - 1)) / barCount;
 
-  // draw area + line
-  const points = bins.map((v, i) => ({
-    x: padL + (i + 0.5) / 20 * plotW,
-    y: padT + plotH - (v / maxBin) * plotH,
-  }));
-
-  // area fill
-  ctx.beginPath();
-  ctx.moveTo(padL, padT + plotH);
-  points.forEach(p => ctx.lineTo(p.x, p.y));
-  ctx.lineTo(padL + plotW, padT + plotH);
-  ctx.closePath();
-  const grad = ctx.createLinearGradient(0, padT, 0, padT + plotH);
-  grad.addColorStop(0, 'rgba(59,130,246,0.25)');
-  grad.addColorStop(1, 'rgba(59,130,246,0.02)');
-  ctx.fillStyle = grad;
-  ctx.fill();
-
-  // line
-  ctx.beginPath();
-  points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-  ctx.strokeStyle = '#3b82f6';
-  ctx.lineWidth = 2;
-  ctx.lineJoin = 'round';
-  ctx.stroke();
-
-  // dots
-  points.forEach((p, i) => {
-    if (bins[i] === 0) return;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-    ctx.fillStyle = '#3b82f6';
-    ctx.fill();
-  });
-
-  // highlight range
-  const loX = padL + (rangeLo / 100) * plotW;
-  const hiX = padL + (rangeHi / 100) * plotW;
-  ctx.fillStyle = 'rgba(59,130,246,0.08)';
-  ctx.fillRect(loX, padT, hiX - loX, plotH);
-
-  // bin labels for non-zero
+  // Y-axis grid lines
+  const yTicks = 4;
+  ctx.strokeStyle = 'rgba(107,114,128,0.15)';
+  ctx.lineWidth = 1;
   ctx.font = '500 9px "Geist Mono", monospace';
-  ctx.textAlign = 'center';
+  ctx.textAlign = 'right';
   ctx.fillStyle = '#6b7280';
-  points.forEach((p, i) => {
-    if (bins[i] > 0) {
-      ctx.fillText(bins[i], p.x, p.y - 6);
+  for (let i = 0; i <= yTicks; i++) {
+    const y = padT + plotH - (i / yTicks) * plotH;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(padL + plotW, y);
+    ctx.stroke();
+    const label = Math.round((i / yTicks) * maxBin);
+    ctx.fillText(label, padL - 6, y + 3);
+  }
+
+  // draw bars
+  bins.forEach((v, i) => {
+    const x = padL + i * (barW + barGap);
+    const barH = (v / maxBin) * plotH;
+    const y = padT + plotH - barH;
+
+    // determine bar color based on score range midpoint
+    const midScore = i * 10 + 5;
+    let barColor;
+    if (midScore > 75) barColor = 'rgba(239,68,68,0.7)';
+    else if (midScore > 40) barColor = 'rgba(245,158,11,0.7)';
+    else barColor = 'rgba(34,197,94,0.7)';
+
+    // highlight if within range
+    const binLo = i * 10;
+    const binHi = (i + 1) * 10;
+    const inRange = binHi > rangeLo && binLo < rangeHi;
+    if (!inRange) {
+      barColor = 'rgba(107,114,128,0.2)';
+    }
+
+    // rounded top corners
+    const r = Math.min(3, barW / 2);
+    ctx.beginPath();
+    ctx.moveTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.arcTo(x + barW, y, x + barW, y + r, r);
+    ctx.lineTo(x + barW, padT + plotH);
+    ctx.lineTo(x, padT + plotH);
+    ctx.closePath();
+    ctx.fillStyle = barColor;
+    ctx.fill();
+
+    // count label on top
+    if (v > 0) {
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '600 10px "Geist Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(v, x + barW / 2, y - 5);
     }
   });
+
+  // X-axis labels
+  ctx.fillStyle = '#6b7280';
+  ctx.font = '500 9px "Geist Mono", monospace';
+  ctx.textAlign = 'center';
+  for (let i = 0; i < barCount; i++) {
+    const x = padL + i * (barW + barGap) + barW / 2;
+    ctx.fillText(`${i * 10}`, x, padT + plotH + 14);
+  }
 }
 
 // ── range slider ─────────────────────────────────────────
@@ -399,14 +419,13 @@ function renderTopics() {
       <div class="topic-card${isOpen ? ' open' : ''}" data-tid="${g.topic_id}">
         <div class="topic-head" onclick="toggleTopic(${g.topic_id})">
           <span class="topic-arrow">▶</span>
-          <span class="topic-id">T${g.topic_id}</span>
+          <span class="topic-avg-score" style="color:${scoreColor(parseFloat(avgScore))}">${avgScore}</span>
           <span class="topic-label">${escHtml(g.label)}</span>
           <span class="topic-count">${g.items.length} 条</span>
           <div class="topic-score-bar">
             ${levels['高'] ? `<span class="topic-score-pill" style="background:var(--high-bg);color:var(--high)">高 ${levels['高']}</span>` : ''}
             ${levels['中'] ? `<span class="topic-score-pill" style="background:var(--mid-bg);color:var(--mid)">中 ${levels['中']}</span>` : ''}
             ${levels['低'] ? `<span class="topic-score-pill" style="background:var(--low-bg);color:var(--low)">低 ${levels['低']}</span>` : ''}
-            <span class="topic-score-pill" style="background:var(--border);color:var(--text-dim)">avg ${avgScore}</span>
           </div>
         </div>
         <div class="topic-body">
