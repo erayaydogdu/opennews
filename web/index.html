@@ -41,12 +41,23 @@
     <section class="chart-section">
       <div class="chart-header">
         <span class="chart-label">SCORE DISTRIBUTION</span>
-        <span class="chart-range-text" id="rangeText">0.0 — 100.0</span>
+        <span class="chart-range-text" id="rangeText">50.0 — 100.0</span>
       </div>
       <canvas id="distChart" width="960" height="140"></canvas>
       <div class="range-wrap">
         <div class="range-track" id="rangeTrack">
           <div class="range-fill" id="rangeFill"></div>
+          <div class="range-dot" style="left:0%" data-val="0"></div>
+          <div class="range-dot" style="left:10%" data-val="10"></div>
+          <div class="range-dot" style="left:20%" data-val="20"></div>
+          <div class="range-dot" style="left:30%" data-val="30"></div>
+          <div class="range-dot" style="left:40%" data-val="40"></div>
+          <div class="range-dot" style="left:50%" data-val="50"></div>
+          <div class="range-dot" style="left:60%" data-val="60"></div>
+          <div class="range-dot" style="left:70%" data-val="70"></div>
+          <div class="range-dot" style="left:80%" data-val="80"></div>
+          <div class="range-dot" style="left:90%" data-val="90"></div>
+          <div class="range-dot" style="left:100%" data-val="100"></div>
           <div class="range-thumb range-thumb--lo" id="thumbLo" tabindex="0"></div>
           <div class="range-thumb range-thumb--hi" id="thumbHi" tabindex="0"></div>
         </div>

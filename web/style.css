@@ -146,8 +146,8 @@ body {
 .chart-section {
   margin-top: 20px;
   padding: 16px 20px 20px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: none;
   border-radius: var(--radius);
 }
 .chart-header {
@@ -208,6 +208,21 @@ body {
   outline: none;
 }
 .range-thumb:active { cursor: grabbing; }
+.range-dot {
+  position: absolute;
+  top: 50%;
+  width: 8px; height: 8px;
+  background: var(--border-hi);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  z-index: 1;
+  transition: background .15s, transform .15s;
+}
+.range-dot:hover {
+  background: var(--accent);
+  transform: translate(-50%, -50%) scale(1.4);
+}
 .range-labels {
   display: flex;
   justify-content: space-between;
@@ -218,7 +233,7 @@ body {
 }
 
 /* ── topic groups ──────────────────────────────────────── */
-.topics { margin-top: 20px; display: flex; flex-direction: column; gap: 8px; }
+.topics { margin-top: 20px; display: flex; flex-direction: column; gap: 4px; padding: 0 50px; }
 .topics-loading {
   text-align: center;
   padding: 40px;
@@ -230,19 +245,23 @@ body {
 
 /* topic card (main tab) */
 .topic-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: none;
   border-radius: var(--radius);
   overflow: hidden;
-  transition: border-color .2s, box-shadow .2s;
+  transition: background .2s;
 }
 .topic-card:hover {
-  border-color: var(--border-hi);
-  box-shadow: 0 1px 4px rgba(0,0,0,.04);
+  background: rgba(0,0,0,.02);
 }
 .topic-card.open {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(37,99,235,.1);
+  background: rgba(0,0,0,.02);
+}
+[data-theme="dark"] .topic-card:hover {
+  background: rgba(255,255,255,.03);
+}
+[data-theme="dark"] .topic-card.open {
+  background: rgba(255,255,255,.03);
 }
 
 .topic-head {
@@ -282,25 +301,20 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.topic-count {
+.topic-src-info {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+  opacity: .7;
+  margin-left: 4px;
+}
+.topic-time-ago {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-dim);
   flex-shrink: 0;
   opacity: .7;
-}
-.topic-score-bar {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-.topic-score-pill {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 500;
-  padding: 1px 7px;
-  border-radius: 10px;
-  opacity: .85;
 }
 
 /* news list inside topic */

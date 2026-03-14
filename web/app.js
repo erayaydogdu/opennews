@@ -32,7 +32,7 @@ $themeToggle.addEventListener('click', () => {
 // ── state ────────────────────────────────────────────────
 let allItems = [];          // raw batch items
 let filteredItems = [];     // after range filter
-let rangeLo = 0;
+let rangeLo = 50;
 let rangeHi = 100;
 let activeNewsId = null;
 
@@ -159,7 +159,7 @@ async function loadData(source, { preserveState = false } = {}) {
   }
 
   if (!preserveState) {
-    rangeLo = 0;
+    rangeLo = 50;
     rangeHi = 100;
   }
   applyFilter();
@@ -224,11 +224,12 @@ function drawChart() {
   const H = rect.height;
   ctx.clearRect(0, 0, W, H);
 
-  // bucket scores into 10 bins (0-10, 10-20, ..., 90-100)
-  const bins = new Array(10).fill(0);
+  // bucket scores into 100 bins (0-1, 1-2, ..., 99-100)
+  const binCount = 100;
+  const bins = new Array(binCount).fill(0);
   allItems.forEach(d => {
     const s = d.report?.final_score ?? 0;
-    const idx = Math.min(9, Math.floor(s / 10));
+    const idx = Math.min(binCount - 1, Math.floor(s));
     bins[idx]++;
   });
   const maxBin = Math.max(...bins, 1);
@@ -236,9 +237,8 @@ function drawChart() {
   const padL = 36, padR = 12, padT = 20, padB = 24;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
-  const barCount = 10;
-  const barGap = 6;
-  const barW = (plotW - barGap * (barCount - 1)) / barCount;
+  const barGap = 1;
+  const barW = (plotW - barGap * (binCount - 1)) / binCount;
 
   // Y-axis grid lines
   const yTicks = 4;
@@ -263,49 +263,30 @@ function drawChart() {
     const barH = (v / maxBin) * plotH;
     const y = padT + plotH - barH;
 
-    // determine bar color based on score range midpoint
-    const midScore = i * 10 + 5;
+    // determine bar color based on score
+    const midScore = i + 0.5;
     let barColor;
-    if (midScore > 75) barColor = 'rgba(239,68,68,0.7)';
-    else if (midScore > 40) barColor = 'rgba(245,158,11,0.7)';
-    else barColor = 'rgba(34,197,94,0.7)';
+    if (midScore > 75) barColor = 'rgba(239,68,68,0.75)';
+    else if (midScore > 40) barColor = 'rgba(245,158,11,0.75)';
+    else barColor = 'rgba(34,197,94,0.75)';
 
-    // highlight if within range
-    const binLo = i * 10;
-    const binHi = (i + 1) * 10;
-    const inRange = binHi > rangeLo && binLo < rangeHi;
+    // dim if outside range
+    const inRange = (i + 1) > rangeLo && i < rangeHi;
     if (!inRange) {
-      barColor = 'rgba(107,114,128,0.2)';
+      barColor = 'rgba(107,114,128,0.15)';
     }
 
-    // rounded top corners
-    const r = Math.min(3, barW / 2);
-    ctx.beginPath();
-    ctx.moveTo(x, y + r);
-    ctx.arcTo(x, y, x + r, y, r);
-    ctx.arcTo(x + barW, y, x + barW, y + r, r);
-    ctx.lineTo(x + barW, padT + plotH);
-    ctx.lineTo(x, padT + plotH);
-    ctx.closePath();
     ctx.fillStyle = barColor;
-    ctx.fill();
-
-    // count label on top
-    if (v > 0) {
-      ctx.fillStyle = '#6b7280';
-      ctx.font = '600 10px "Geist Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(v, x + barW / 2, y - 5);
-    }
+    ctx.fillRect(x, y, barW, barH);
   });
 
-  // X-axis labels
+  // X-axis labels (every 10)
   ctx.fillStyle = '#6b7280';
   ctx.font = '500 9px "Geist Mono", monospace';
   ctx.textAlign = 'center';
-  for (let i = 0; i < barCount; i++) {
-    const x = padL + i * (barW + barGap) + barW / 2;
-    ctx.fillText(`${i * 10}`, x, padT + plotH + 14);
+  for (let i = 0; i <= 100; i += 10) {
+    const x = padL + i * (barW + barGap);
+    ctx.fillText(`${i}`, x, padT + plotH + 14);
   }
 }
 
@@ -356,6 +337,19 @@ function initRangeSlider() {
   // click on track
   $rangeTrack.addEventListener('click', (e) => {
     if (e.target.classList.contains('range-thumb')) return;
+    // handle dot click — snap to integer value
+    if (e.target.classList.contains('range-dot')) {
+      const snapVal = parseInt(e.target.dataset.val, 10);
+      const distLo = Math.abs(snapVal - rangeLo);
+      const distHi = Math.abs(snapVal - rangeHi);
+      if (distLo <= distHi) {
+        rangeLo = Math.min(snapVal, rangeHi - 1);
+      } else {
+        rangeHi = Math.max(snapVal, rangeLo + 1);
+      }
+      applyFilter();
+      return;
+    }
     const val = Math.round(getVal(e) * 10) / 10;
     const distLo = Math.abs(val - rangeLo);
     const distHi = Math.abs(val - rangeHi);
@@ -406,8 +400,6 @@ function renderTopics() {
     const scores = g.items.map(i => i.report?.final_score ?? 0);
     const maxScore = Math.max(...scores);
     const avgScore = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1);
-    const levels = { '高': 0, '中': 0, '低': 0 };
-    g.items.forEach(i => { levels[i.report?.impact_level] = (levels[i.report?.impact_level] || 0) + 1; });
 
     // sort items by score desc
     g.items.sort((a, b) => (b.report?.final_score ?? 0) - (a.report?.final_score ?? 0));
@@ -415,18 +407,30 @@ function renderTopics() {
     // 恢复展开状态
     const isOpen = openTopics.has(String(g.topic_id));
 
+    // 统计来源分布
+    const srcCounts = {};
+    g.items.forEach(i => {
+      const s = sourceName(i.news?.source);
+      srcCounts[s] = (srcCounts[s] || 0) + 1;
+    });
+    const srcText = Object.entries(srcCounts).map(([s, c]) => `${s} +${c}`).join('，');
+
+    // 最新新闻的时间差
+    const latestTime = g.items.reduce((latest, i) => {
+      const t = i.news?.published_at;
+      if (!t) return latest;
+      const d = new Date(t);
+      return (!latest || d > latest) ? d : latest;
+    }, null);
+    const timeAgo = latestTime ? fmtTimeAgo(latestTime.toISOString()) : '';
+
     return `
       <div class="topic-card${isOpen ? ' open' : ''}" data-tid="${g.topic_id}">
         <div class="topic-head" onclick="toggleTopic(${g.topic_id})">
           <span class="topic-arrow">▶</span>
           <span class="topic-avg-score" style="color:${scoreColor(parseFloat(avgScore))}">${avgScore}</span>
-          <span class="topic-label">${escHtml(g.label)}</span>
-          <span class="topic-count">${g.items.length} 条</span>
-          <div class="topic-score-bar">
-            ${levels['高'] ? `<span class="topic-score-pill" style="background:var(--high-bg);color:var(--high)">高 ${levels['高']}</span>` : ''}
-            ${levels['中'] ? `<span class="topic-score-pill" style="background:var(--mid-bg);color:var(--mid)">中 ${levels['中']}</span>` : ''}
-            ${levels['低'] ? `<span class="topic-score-pill" style="background:var(--low-bg);color:var(--low)">低 ${levels['低']}</span>` : ''}
-          </div>
+          <span class="topic-label">${escHtml(g.label)}<span class="topic-src-info">（${escHtml(srcText)}）</span></span>
+          ${timeAgo ? `<span class="topic-time-ago">${timeAgo}</span>` : ''}
         </div>
         <div class="topic-body">
           <div class="news-list">
@@ -463,6 +467,27 @@ function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 function escAttr(s) { return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
 const isValidUrl = (url) => url && (url.startsWith('http://') || url.startsWith('https://'));
+
+const fmtTimeAgo = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const now = Date.now();
+  const diff = now - d.getTime();
+  if (diff < 0) return '0m';
+  const mins = Math.floor(diff / 60000);
+  const hours = Math.floor(mins / 60);
+  const days = Math.floor(hours / 24);
+  if (days > 0) {
+    const remH = hours - days * 24;
+    return remH > 0 ? `${days}d${remH}h` : `${days}d`;
+  }
+  if (hours > 0) {
+    const remM = mins - hours * 60;
+    return remM > 0 ? `${hours}h${remM}m` : `${hours}h`;
+  }
+  return `${mins}m`;
+};
 
 // ── topic toggle ─────────────────────────────────────────
 window.toggleTopic = function(tid) {
@@ -663,7 +688,7 @@ document.getElementById('fileInput').addEventListener('change', (e) => {
   reader.onload = () => {
     try {
       allItems = JSON.parse(reader.result).filter(d => d.news && d.report);
-      rangeLo = 0;
+      rangeLo = 50;
       rangeHi = 100;
       applyFilter();
     } catch (err) {
