@@ -250,7 +250,7 @@ function drawChart() {
   // Y-axis grid lines (dashed)
   const yTicks = 4;
   ctx.lineWidth = 1;
-  ctx.font = '500 9px "Geist Mono", monospace';
+  ctx.font = '500 9px "JetBrains Mono", monospace';
   ctx.textAlign = 'right';
   for (let i = 0; i <= yTicks; i++) {
     const y = padT + plotH - (i / yTicks) * plotH;
@@ -291,7 +291,7 @@ function drawChart() {
 
   // X-axis labels (every 10)
   ctx.fillStyle = '#6b7280';
-  ctx.font = '500 9px "Geist Mono", monospace';
+  ctx.font = '500 9px "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
   for (let i = 0; i <= 100; i += 10) {
     const x = padL + i * (barW + barGap);
