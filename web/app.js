@@ -35,6 +35,7 @@ let filteredItems = [];     // after range filter
 let rangeLo = 50;
 let rangeHi = 100;
 let activeNewsId = null;
+let sortMode = 'score'; // 'score' | 'time' | 'avg'
 
 // ── DOM refs ─────────────────────────────────────────────
 const $topicList   = document.getElementById('topicList');
@@ -240,20 +241,22 @@ function drawChart() {
   const barGap = 1;
   const barW = (plotW - barGap * (binCount - 1)) / binCount;
 
-  // Y-axis grid lines
+  // Y-axis grid lines (dashed)
   const yTicks = 4;
-  ctx.strokeStyle = 'rgba(107,114,128,0.15)';
   ctx.lineWidth = 1;
   ctx.font = '500 9px "Geist Mono", monospace';
   ctx.textAlign = 'right';
-  ctx.fillStyle = '#6b7280';
   for (let i = 0; i <= yTicks; i++) {
     const y = padT + plotH - (i / yTicks) * plotH;
     ctx.beginPath();
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = 'rgba(107,114,128,0.12)';
     ctx.moveTo(padL, y);
     ctx.lineTo(padL + plotW, y);
     ctx.stroke();
+    ctx.setLineDash([]);
     const label = Math.round((i / yTicks) * maxBin);
+    ctx.fillStyle = 'rgba(107,114,128,0.5)';
     ctx.fillText(label, padL - 6, y + 3);
   }
 
@@ -384,12 +387,28 @@ function renderTopics() {
     groups.get(tid).items.push(item);
   });
 
-  // sort groups by max score desc
-  const sorted = [...groups.values()].sort((a, b) => {
-    const maxA = Math.max(...a.items.map(i => i.report?.final_score ?? 0));
-    const maxB = Math.max(...b.items.map(i => i.report?.final_score ?? 0));
-    return maxB - maxA;
-  });
+  // sort groups based on sortMode
+  let sorted;
+  if (sortMode === 'time') {
+    sorted = [...groups.values()].sort((a, b) => {
+      const latestA = Math.max(...a.items.map(i => new Date(i.news?.published_at || 0).getTime()));
+      const latestB = Math.max(...b.items.map(i => new Date(i.news?.published_at || 0).getTime()));
+      return latestB - latestA;
+    });
+  } else if (sortMode === 'avg') {
+    sorted = [...groups.values()].sort((a, b) => {
+      const avgA = a.items.reduce((s, i) => s + (i.report?.final_score ?? 0), 0) / a.items.length;
+      const avgB = b.items.reduce((s, i) => s + (i.report?.final_score ?? 0), 0) / b.items.length;
+      return avgB - avgA;
+    });
+  } else {
+    // default: sort by max score desc
+    sorted = [...groups.values()].sort((a, b) => {
+      const maxA = Math.max(...a.items.map(i => i.report?.final_score ?? 0));
+      const maxB = Math.max(...b.items.map(i => i.report?.final_score ?? 0));
+      return maxB - maxA;
+    });
+  }
 
   if (sorted.length === 0) {
     $topicList.innerHTML = '<div class="topics-loading">当前范围内无新闻数据</div>';
@@ -696,6 +715,16 @@ document.getElementById('fileInput').addEventListener('change', (e) => {
     }
   };
   reader.readAsText(file);
+});
+
+// ── sort buttons ──────────────────────────────────────────
+document.querySelectorAll('.sort-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    sortMode = btn.dataset.sort;
+    renderTopics();
+  });
 });
 
 // ── resize ───────────────────────────────────────────────

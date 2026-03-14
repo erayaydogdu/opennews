@@ -175,7 +175,7 @@ body {
 }
 
 /* ── range slider ──────────────────────────────────────── */
-.range-wrap { margin-top: 12px; padding: 0 2px; }
+.range-wrap { margin-top: 12px; padding: 0 12px 0 36px; }
 .range-track {
   position: relative;
   height: 6px;
@@ -230,6 +230,32 @@ body {
   font-family: var(--font-mono);
   font-size: 9px;
   color: var(--text-dim);
+}
+
+/* ── sort bar ──────────────────────────────────────────── */
+.sort-bar {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 0 36px;
+}
+.sort-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1.5px solid transparent;
+  border-radius: 4px;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.sort-btn:hover {
+  color: var(--text);
+}
+.sort-btn.active {
+  color: var(--text-bright);
+  border-color: var(--border-hi);
 }
 
 /* ── topic groups ──────────────────────────────────────── */
