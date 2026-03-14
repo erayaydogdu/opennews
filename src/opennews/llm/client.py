@@ -24,6 +24,7 @@ class LLMConfig:
     max_tokens: int = 4096
     timeout: int = 60
     topic_refine_enabled: bool = True
+    topic_refine_max_retries: int = 2
     topic_refine_system_prompt: str = ""
     topic_refine_user_prompt_template: str = ""
 
@@ -55,6 +56,7 @@ class LLMConfig:
             max_tokens=int(raw.get("max_tokens", 4096)),
             timeout=int(raw.get("timeout", 60)),
             topic_refine_enabled=raw.get("topic_refine_enabled", True),
+            topic_refine_max_retries=int(raw.get("topic_refine_max_retries", 2)),
             topic_refine_system_prompt=topic_refine.get("system_prompt", ""),
             topic_refine_user_prompt_template=topic_refine.get("user_prompt_template", ""),
         )

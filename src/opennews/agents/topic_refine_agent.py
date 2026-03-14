@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 
 from opennews.llm.client import LLMClient, LLMConfig
@@ -77,14 +78,31 @@ class TopicRefineAgent:
                 continue  # 单条无需精炼
 
             titles = [docs[i].split("\n")[0] for i in member_indices]
-            try:
-                refined = self._call_llm_refine(titles)
-            except Exception:
+            max_retries = max(0, self.config.topic_refine_max_retries)
+            refined = None
+            last_err: Exception | None = None
+
+            for attempt in range(1 + max_retries):
+                try:
+                    refined = self._call_llm_refine(titles)
+                    break
+                except Exception as e:
+                    last_err = e
+                    if attempt < max_retries:
+                        wait = 2 ** attempt  # 1s, 2s, 4s ...
+                        logger.warning(
+                            "LLM refine failed for topic %d (attempt %d/%d): %s — retrying in %ds",
+                            tid, attempt + 1, 1 + max_retries, e, wait,
+                        )
+                        time.sleep(wait)
+
+            if refined is None:
                 logger.warning(
-                    "LLM refine failed for topic %d (%d items), keeping original clustering. "
-                    "Check LLM API connectivity and config/llm.yaml settings.",
-                    tid, len(member_indices),
-                    exc_info=True,
+                    "LLM refine failed for topic %d after %d attempts (%d items), "
+                    "keeping original clustering. "
+                    "Check LLM API connectivity and config/llm.yaml settings. "
+                    "Last error: %s",
+                    tid, 1 + max_retries, len(member_indices), last_err,
                 )
                 continue
 
