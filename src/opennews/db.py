@@ -57,7 +57,7 @@ def get_conn():
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS batches (
     batch_id    SERIAL PRIMARY KEY,
-    batch_ts    VARCHAR(15) NOT NULL UNIQUE,   -- YYYYMMDD_HHMMSS
+    batch_ts    VARCHAR(20) NOT NULL UNIQUE,   -- YYYYMMDD_HHMMSS_mmm
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     record_count INTEGER NOT NULL DEFAULT 0
 );
@@ -80,6 +80,15 @@ CREATE TABLE IF NOT EXISTS reports (
     summary     JSONB
 );
 CREATE INDEX IF NOT EXISTS idx_reports_batch ON reports(batch_id);
+
+-- migrations: 兼容已有表
+ALTER TABLE batches ALTER COLUMN batch_ts TYPE VARCHAR(20);
+
+DO $$ BEGIN
+    ALTER TABLE batch_records ADD COLUMN news_url TEXT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_batch_records_url ON batch_records(news_url);
 """
 
 
@@ -93,8 +102,21 @@ def ensure_schema():
 
 # ── 写入 ──────────────────────────────────────────────────
 
+def get_existing_urls(urls: list[str]) -> set[str]:
+    """查询数据库中已存在的新闻 URL 集合。"""
+    if not urls:
+        return set()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT news_url FROM batch_records WHERE news_url = ANY(%s)",
+                (urls,),
+            )
+            return {row[0] for row in cur.fetchall()}
+
+
 def insert_batch(batch_ts: str, records: list[dict]) -> int:
-    """插入一个批次及其所有记录，返回 batch_id。"""
+    """插入一个批次及其所有记录（跳过 URL 已存在的），返回 batch_id。"""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -103,13 +125,26 @@ def insert_batch(batch_ts: str, records: list[dict]) -> int:
             )
             batch_id = cur.fetchone()[0]
 
+            inserted = 0
             for rec in records:
-                news_id = (rec.get("news") or {}).get("news_id")
+                news = rec.get("news") or {}
+                news_id = news.get("news_id")
+                news_url = news.get("url")
                 cur.execute(
-                    "INSERT INTO batch_records (batch_id, news_id, payload) VALUES (%s, %s, %s)",
-                    (batch_id, news_id, json.dumps(rec, ensure_ascii=False)),
+                    "INSERT INTO batch_records (batch_id, news_id, news_url, payload) "
+                    "VALUES (%s, %s, %s, %s) "
+                    "ON CONFLICT (news_url) DO NOTHING",
+                    (batch_id, news_id, news_url, json.dumps(rec, ensure_ascii=False)),
                 )
-    logger.info("inserted batch %s (%d records) → batch_id=%d", batch_ts, len(records), batch_id)
+                inserted += cur.rowcount
+
+            # 更新实际插入数
+            cur.execute(
+                "UPDATE batches SET record_count = %s WHERE batch_id = %s",
+                (inserted, batch_id),
+            )
+    logger.info("inserted batch %s (%d/%d records, %d skipped) → batch_id=%d",
+                batch_ts, inserted, len(records), len(records) - inserted, batch_id)
     return batch_id
 
 
@@ -184,14 +219,15 @@ def get_batch_id_by_ts(batch_ts: str) -> int | None:
 
 
 def get_records_since(hours: float) -> list[dict]:
-    """获取最近 N 小时内所有批次的记录（跨批次合并，按发布时间倒序）。"""
+    """获取最近 N 小时内的记录（按 news_url 去重，保留最新）。"""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT br.payload FROM batch_records br "
+                "SELECT DISTINCT ON (COALESCE(br.news_url, br.id::text)) br.payload "
+                "FROM batch_records br "
                 "JOIN batches b ON br.batch_id = b.batch_id "
                 "WHERE b.created_at >= now() - interval '%s hours' "
-                "ORDER BY br.id DESC",
+                "ORDER BY COALESCE(br.news_url, br.id::text), br.id DESC",
                 (hours,),
             )
             return [row[0] for row in cur.fetchall()]

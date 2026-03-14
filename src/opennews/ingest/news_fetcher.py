@@ -25,19 +25,37 @@ class NewsItem:
     published_at: datetime
 
 
+def normalize_url(url: str) -> str:
+    """URL 标准化：去除尾部斜杠、query 中的跟踪参数、fragment 等。"""
+    from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+    url = url.strip()
+    p = urlparse(url)
+    # 去除 fragment
+    # 去除常见跟踪参数
+    drop_params = {"utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "spm", "from"}
+    qs = {k: v for k, v in parse_qs(p.query).items() if k not in drop_params}
+    cleaned = urlunparse((
+        p.scheme,
+        p.netloc,
+        p.path.rstrip("/"),
+        p.params,
+        urlencode(qs, doseq=True),
+        "",  # drop fragment
+    ))
+    return cleaned
+
+
 def _make_news_id(url: str, published_at: datetime) -> str:
-    raw = f"{url}|{published_at.isoformat()}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]
 
 
 def deduplicate_news(items: list[NewsItem]) -> list[NewsItem]:
     seen: set[str] = set()
     result: list[NewsItem] = []
     for item in items:
-        key = f"{item.url}|{item.published_at.isoformat()}"
-        if key in seen:
+        if item.url in seen:
             continue
-        seen.add(key)
+        seen.add(item.url)
         result.append(item)
     return result
 
@@ -78,7 +96,7 @@ def fetch_newsnow(
         source_id = source_block.get("id", "unknown")
         for entry in source_block.get("items", [])[:limit]:
             title = (entry.get("title") or "").strip()
-            url = (entry.get("url") or "").strip()
+            url = normalize_url((entry.get("url") or ""))
             if not title or not url:
                 continue
 
