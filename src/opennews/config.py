@@ -53,5 +53,8 @@ class Settings:
         "wallstreetcn-news",
     )
 
+    # LLM 配置文件路径
+    llm_config_path: str = os.getenv("LLM_CONFIG_PATH", "config/llm.yaml")
+
 
 settings = Settings()

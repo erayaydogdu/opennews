@@ -1,0 +1,50 @@
+# ═══════════════════════════════════════════════════════════
+#  OpenNews — LLM 配置
+#  用于主题精炼（Topic Refinement）等需要 LLM 推理的场景
+# ═══════════════════════════════════════════════════════════
+
+# 基础连接配置（环境变量可覆盖：LLM_API_KEY, LLM_BASE_URL, LLM_MODEL）
+provider: openai              # openai | openai_compatible
+base_url: https://cliproxy-jp.toapis.org/v1                # 自定义 endpoint（ollama / vllm / one-api 等），null 则用 OpenAI 官方
+api_key: sk-2gJH1kqxMoXbSDqz419aC60eF95a4f8f80465dAfBf39D1C9                 # 在此填写或通过 LLM_API_KEY 环境变量设置
+model: gpt-5.2            # 推荐 gpt-4o-mini（性价比高），也可用 deepseek-chat 等
+temperature: 0.1              # 低温度保证分类稳定性
+max_tokens: 4096
+timeout: 60                   # 单次请求超时（秒）
+
+# 功能开关
+topic_refine_enabled: true    # 是否启用 LLM 主题精炼，false 时退化为纯聚类
+
+# 主题精炼 Prompt 配置
+topic_refine:
+  # 系统提示词
+  system_prompt: |
+    你是一个新闻主题聚类分析师。
+    你擅长从一组新闻标题中识别出哪些报道的是同一件事或同一个话题，哪些只是表面相似但实际无关。
+    判断标准是新闻所讨论的核心事件、主体和因果关系，而非共享的宽泛关键词或领域。
+
+  # 用户提示词模板（{news_list} 会被替换为新闻列表）
+  user_prompt_template: |
+    以下新闻被初步判定为同一主题，请重新审视并分组：
+
+    {news_list}
+
+    将真正讨论同一事件/话题的新闻归为一组，不相关的拆分出去。
+
+    输出严格 JSON：
+    ```json
+    {{
+      "groups": [
+        {{
+          "label": "简洁的中文主题标签（10字以内）",
+          "indices": [0, 2, 5]
+        }}
+      ]
+    }}
+    ```
+
+    要求：
+    1. indices 为新闻序号（从 0 开始），每条新闻只能出现一次
+    2. 与组内其他新闻无关的，单独成组
+    3. label 应准确概括该组的共同话题
+    4. 只输出 JSON

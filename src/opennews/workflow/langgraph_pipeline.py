@@ -29,6 +29,8 @@ from opennews.memory import MemoryRecord, RedisMemoryStore
 from opennews.nlp.embedder import TextEmbedder
 from opennews.nlp.entity_extractor import EntityExtractor
 from opennews.topic.online_topic_model import OnlineTopicModel
+from opennews.agents.topic_refine_agent import TopicRefineAgent
+from opennews.llm.client import LLMConfig
 
 
 class PipelineState(TypedDict, total=False):
@@ -54,6 +56,10 @@ class PipelineRuntime:
     extractor: EntityExtractor = field(default_factory=lambda: EntityExtractor(settings.ner_model))
     topic_model: OnlineTopicModel = field(
         default_factory=OnlineTopicModel
+    )
+    # LLM 主题精炼 Agent
+    topic_refine_agent: TopicRefineAgent = field(
+        default_factory=lambda: TopicRefineAgent(LLMConfig.load(settings.llm_config_path))
     )
     # Step2: Classifier Agent & Feature Agent（复用同一个 NLI 模型）
     classifier: ClassifierAgent = field(
@@ -128,6 +134,18 @@ def fetch_news_node(state: PipelineState) -> PipelineState:
     if last_dt:
         batch = [b for b in batch if b.published_at > last_dt]
 
+    # 排除数据库中已有分析结果的新闻（以 URL 为唯一标识）
+    if batch:
+        from opennews.db import get_existing_urls
+        try:
+            existing = get_existing_urls([b.url for b in batch])
+            if existing:
+                before = len(batch)
+                batch = [b for b in batch if b.url not in existing]
+                logger.info("dedup: %d already in DB, %d new", before - len(batch), len(batch))
+        except Exception:
+            logger.exception("dedup check failed, proceeding with full batch")
+
     batch.sort(key=lambda x: x.published_at)
     return {"news_batch": batch}
 
@@ -157,6 +175,22 @@ def topic_node(state: PipelineState) -> PipelineState:
         return {"topics": []}
     topics = runtime.topic_model.update_and_assign(docs, embeddings=embeddings or None)
     return {"topics": topics}
+
+
+def refine_topics_node(state: PipelineState) -> PipelineState:
+    """LLM 主题精炼：对聚类候选组进行语义拆分。"""
+    docs = state.get("docs", [])
+    topics = state.get("topics", [])
+    if not docs or not topics:
+        return {"topics": topics}
+
+    labels = {a.topic_id: runtime.topic_model.get_topic_label(a.topic_id) for a in topics}
+    refined, refined_labels = runtime.topic_refine_agent.refine_topics(docs, topics, labels)
+
+    # 回写 labels 到 topic_model 以便后续 get_topic_label 正常工作
+    runtime.topic_model._labels.update(refined_labels)
+
+    return {"topics": refined}
 
 
 # ── Step2: Classifier Agent 节点 ──────────────────────────────
@@ -249,7 +283,8 @@ def dump_output_node(state: PipelineState) -> PipelineState:
     if not payloads:
         return {}
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    now = datetime.now(timezone.utc)
+    ts = now.strftime("%Y%m%d_%H%M%S") + f"_{now.microsecond // 1000:03d}"
 
     records = []
     for p in payloads:
@@ -426,6 +461,7 @@ def build_pipeline():
     g.add_node("embed", embed_node)
     g.add_node("extract_entities", entity_node)
     g.add_node("topics", topic_node)
+    g.add_node("refine_topics", refine_topics_node)
     # Step2: Agent 节点
     g.add_node("classify", classify_node)
     g.add_node("extract_features", feature_node)
@@ -445,8 +481,9 @@ def build_pipeline():
     g.add_edge("extract_entities", "topics")
     g.add_edge("extract_entities", "classify")
     g.add_edge("extract_entities", "extract_features")
-    # 三路汇聚到 build_payload
-    g.add_edge("topics", "build_payload")
+    # topics → LLM refine → build_payload
+    g.add_edge("topics", "refine_topics")
+    g.add_edge("refine_topics", "build_payload")
     g.add_edge("classify", "build_payload")
     g.add_edge("extract_features", "build_payload")
     g.add_edge("build_payload", "memory_ingest")

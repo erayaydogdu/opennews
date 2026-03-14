@@ -28,3 +28,7 @@ python-dateutil>=2.9.0
 # ── Storage backends ─────────────────────────────────────
 redis>=5.0.0
 psycopg2-binary>=2.9.9
+
+# ── LLM (topic refinement) ──────────────────────────────
+openai>=1.30.0
+pyyaml>=6.0
