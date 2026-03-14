@@ -104,16 +104,23 @@ class PipelineRuntime:
     )
 
 
-runtime = PipelineRuntime()
-# Step3: 延迟初始化依赖 runtime 自身的组件
-runtime.memory_agent = MemoryAgent(runtime.memory_store)
-runtime.graphrag_querier = GraphRAGQuerier(runtime.graph_client)
+runtime: PipelineRuntime | None = None
+
+
+def _get_runtime() -> PipelineRuntime:
+    """延迟初始化 runtime，避免模块导入时加载重型模型。"""
+    global runtime
+    if runtime is None:
+        runtime = PipelineRuntime()
+        runtime.memory_agent = MemoryAgent(runtime.memory_store)
+        runtime.graphrag_querier = GraphRAGQuerier(runtime.graph_client)
+    return runtime
 
 
 def init_graph_schema() -> bool:
     """延迟初始化图谱 schema，避免模块导入阶段因 Neo4j 未启动直接崩溃。"""
     try:
-        runtime.graph_client.ensure_schema()
+        _get_runtime().graph_client.ensure_schema()
         return True
     except ServiceUnavailable:
         return False
@@ -122,11 +129,12 @@ def init_graph_schema() -> bool:
 
 
 def fetch_news_node(state: PipelineState) -> PipelineState:
-    last_dt = runtime.checkpoint.load_last_published_at()
+    rt = _get_runtime()
+    last_dt = rt.checkpoint.load_last_published_at()
 
     # 从所有 newsnow 端点抓取
     news_batch: list[NewsItem] = []
-    for endpoint in runtime.sources_config.newsnow:
+    for endpoint in rt.sources_config.newsnow:
         items = fetch_newsnow(
             api_url=endpoint.url,
             sources=endpoint.sources,
@@ -135,7 +143,7 @@ def fetch_news_node(state: PipelineState) -> PipelineState:
         )
         news_batch.extend(items)
 
-    seed_batch = runtime.seed_injector.load()
+    seed_batch = rt.seed_injector.load()
 
     batch = deduplicate_news(news_batch + seed_batch)
     if last_dt:
@@ -163,7 +171,7 @@ def embed_node(state: PipelineState) -> PipelineState:
         return {"docs": [], "embeddings": []}
 
     docs = [f"{n.title}\n{n.content}" for n in news]
-    vecs = runtime.embedder.encode(docs).vectors
+    vecs = _get_runtime().embedder.encode(docs).vectors
     return {"docs": docs, "embeddings": vecs.tolist()}
 
 
@@ -171,7 +179,7 @@ def entity_node(state: PipelineState) -> PipelineState:
     docs = state.get("docs", [])
     if not docs:
         return {"entities": []}
-    entities = [runtime.extractor.extract(d) for d in docs]
+    entities = [_get_runtime().extractor.extract(d) for d in docs]
     return {"entities": entities}
 
 
@@ -180,7 +188,7 @@ def topic_node(state: PipelineState) -> PipelineState:
     embeddings = state.get("embeddings", [])
     if not docs:
         return {"topics": []}
-    topics = runtime.topic_model.update_and_assign(docs, embeddings=embeddings or None)
+    topics = _get_runtime().topic_model.update_and_assign(docs, embeddings=embeddings or None)
     return {"topics": topics}
 
 
@@ -191,11 +199,12 @@ def refine_topics_node(state: PipelineState) -> PipelineState:
     if not docs or not topics:
         return {"topics": topics}
 
-    labels = {a.topic_id: runtime.topic_model.get_topic_label(a.topic_id) for a in topics}
-    refined, refined_labels = runtime.topic_refine_agent.refine_topics(docs, topics, labels)
+    rt = _get_runtime()
+    labels = {a.topic_id: rt.topic_model.get_topic_label(a.topic_id) for a in topics}
+    refined, refined_labels = rt.topic_refine_agent.refine_topics(docs, topics, labels)
 
     # 回写 labels 到 topic_model 以便后续 get_topic_label 正常工作
-    runtime.topic_model._labels.update(refined_labels)
+    rt.topic_model._labels.update(refined_labels)
 
     return {"topics": refined}
 
@@ -207,7 +216,7 @@ def classify_node(state: PipelineState) -> PipelineState:
     if not docs:
         return {"classifications": []}
     try:
-        classifications = runtime.classifier.classify_batch(docs)
+        classifications = _get_runtime().classifier.classify_batch(docs)
     except Exception:
         logger.exception("classify_node failed, fallback to empty")
         from opennews.agents.classifier_agent import ClassificationResult
@@ -225,7 +234,7 @@ def feature_node(state: PipelineState) -> PipelineState:
     if not docs:
         return {"features": []}
     try:
-        features = runtime.feature_agent.extract_features_batch(docs)
+        features = _get_runtime().feature_agent.extract_features_batch(docs)
     except Exception:
         logger.exception("feature_node failed, fallback to defaults")
         from opennews.agents.feature_agent import FeatureVector
@@ -249,7 +258,7 @@ def build_payload_node(state: PipelineState) -> PipelineState:
     for i in range(safe_n):
         item = news[i]
         topic = topics[i]
-        label = runtime.topic_model.get_topic_label(topic.topic_id)
+        label = _get_runtime().topic_model.get_topic_label(topic.topic_id)
         payload = build_graph_payload(
             item=item,
             embedding=embeds[i],
@@ -347,12 +356,12 @@ def write_graph_node(state: PipelineState) -> PipelineState:
         return {"result": "neo4j unavailable, skip graph write this round"}
 
     try:
-        runtime.graph_client.upsert_batch(payloads)
+        _get_runtime().graph_client.upsert_batch(payloads)
     except ServiceUnavailable:
         return {"result": "neo4j unavailable, skip graph write this round"}
 
     latest = max(n.published_at for n in news_batch)
-    runtime.checkpoint.save_last_published_at(latest)
+    _get_runtime().checkpoint.save_last_published_at(latest)
     return {"result": f"updated {len(payloads)} news into graph"}
 
 
@@ -375,14 +384,14 @@ def memory_ingest_node(state: PipelineState) -> PipelineState:
         ))
 
     try:
-        runtime.memory_agent.ingest(records)
+        _get_runtime().memory_agent.ingest(records)
     except Exception:
         logger.exception("memory ingest failed")
 
     # 聚合当前批次涉及的所有 topic
     topic_ids = {r.topic_id for r in records}
     try:
-        trends = runtime.memory_agent.aggregate_batch_topics(
+        trends = _get_runtime().memory_agent.aggregate_batch_topics(
             topic_ids, window_days=settings.memory_window_days
         )
     except Exception:
@@ -408,7 +417,7 @@ def update_trends_node(state: PipelineState) -> PipelineState:
             "total_news_count": trend.total_news_count,
         }
         try:
-            if runtime.graphrag_querier.upsert_topic_trend(topic_id, trend_data):
+            if _get_runtime().graphrag_querier.upsert_topic_trend(topic_id, trend_data):
                 updated += 1
         except Exception:
             logger.exception("trend upsert failed for topic %d", topic_id)
@@ -441,7 +450,7 @@ def report_node(state: PipelineState) -> PipelineState:
         })
 
     try:
-        reports = runtime.report_agent.evaluate_batch(eval_items, trends=trends)
+        reports = _get_runtime().report_agent.evaluate_batch(eval_items, trends=trends)
     except Exception:
         logger.exception("report_node failed")
         reports = []
