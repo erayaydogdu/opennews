@@ -2,4 +2,6 @@
 output/
 __pycache__
 CLAUDE.md
+docker/postgres/
 docker/neo4j/
+docker/redis/

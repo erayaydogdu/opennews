@@ -59,14 +59,36 @@ After `extract_entities`, three branches run in parallel (BERTopic clustering / 
 ### Quick Start with Docker
 
 ```bash
-# Start all services
+# Start everything (infra + backend + web dashboard)
 docker compose -f docker/docker-compose.yml up -d
 
 # Verify
 docker compose -f docker/docker-compose.yml ps
 ```
 
-This brings up PostgreSQL, Neo4j, and Redis with health checks and resource limits. See `docker/docker-compose.yml` for full configuration.
+This brings up PostgreSQL, Neo4j, Redis, the backend pipeline, and the web dashboard. All data is persisted to local directories under `docker/` (postgres, neo4j, redis). The `seeds/` and `config/` directories are mounted into the backend container, so you can edit news sources and seed files on the host and they take effect immediately.
+
+Data volumes:
+
+| Service | Host Path | Container Path |
+|---------|-----------|----------------|
+| PostgreSQL | `docker/postgres/` | `/var/lib/postgresql/data` |
+| Neo4j | `docker/neo4j/data/`, `docker/neo4j/logs/` | `/data`, `/logs` |
+| Redis | `docker/redis/` | `/data` |
+| Backend config | `config/` | `/app/config` |
+| Backend seeds | `seeds/` | `/app/seeds` |
+
+Web dashboard: http://localhost:8080 (configurable via `WEB_PORT`)
+
+### Docker-only (no local Python)
+
+If you only want to use Docker without installing Python locally:
+
+```bash
+docker compose -f docker/docker-compose.yml up -d
+```
+
+Edit `config/sources.yaml` and `config/llm.yaml` on the host. Add seed news to `seeds/realtime_seeds.jsonl`. The backend container picks them up automatically.
 
 ## Installation
 
@@ -89,26 +111,37 @@ The following HuggingFace models are downloaded automatically on first run (~1.5
 
 ## Usage
 
-### Run the Pipeline
+### Docker (recommended)
 
 ```bash
-# Start the polling scheduler (runs every 5 minutes)
-PYTHONPATH=src python -m opennews.main
+# Start all services including backend pipeline and web dashboard
+docker compose -f docker/docker-compose.yml up -d
+
+# View logs
+docker compose -f docker/docker-compose.yml logs -f backend
+
+# Stop
+docker compose -f docker/docker-compose.yml down
 ```
 
-### Run the Web Dashboard
+### Local Development
 
 ```bash
-# In a separate terminal
+# Start infra only
+docker compose -f docker/docker-compose.yml up -d postgres neo4j redis
+
+# Run the pipeline
+PYTHONPATH=src python -m opennews.main
+
+# Run the web dashboard (separate terminal)
 PYTHONPATH=src python web/server.py --port 8080
 ```
 
 Open http://localhost:8080 to browse results.
 
-### One-Command Start
+### One-Command Start (legacy)
 
 ```bash
-# build.sh starts all services, checks dependencies, and launches both backend + frontend
 ./build.sh
 ```
 
@@ -263,7 +296,8 @@ opennews/
 │   ├── llm.yaml                       # LLM settings
 │   └── sources.yaml                   # News source config
 ├── docker/
-│   └── docker-compose.yml             # PostgreSQL + Neo4j + Redis
+│   └── docker-compose.yml             # Full stack: PG + Neo4j + Redis + backend + web
+├── Dockerfile                           # Backend & web image
 ├── seeds/
 │   └── realtime_seeds.jsonl           # Seed news
 ├── build.sh                           # One-command launcher
@@ -325,12 +359,26 @@ OpenNews 是一个基于 LangGraph 编排的金融新闻处理流水线。自动
 ### Docker 快速启动
 
 ```bash
-# 启动所有服务
+# 启动全部服务（基础设施 + 后端流水线 + Web 面板）
 docker compose -f docker/docker-compose.yml up -d
 
-# 验证状态
+# 查看状态
 docker compose -f docker/docker-compose.yml ps
 ```
+
+所有数据持久化到 `docker/` 下的本地目录（postgres、neo4j、redis）。`seeds/` 和 `config/` 目录挂载到后端容器中，在宿主机上编辑即可生效。
+
+数据卷映射：
+
+| 服务 | 宿主机路径 | 容器路径 |
+|------|-----------|----------|
+| PostgreSQL | `docker/postgres/` | `/var/lib/postgresql/data` |
+| Neo4j | `docker/neo4j/data/`、`docker/neo4j/logs/` | `/data`、`/logs` |
+| Redis | `docker/redis/` | `/data` |
+| 后端配置 | `config/` | `/app/config` |
+| 种子新闻 | `seeds/` | `/app/seeds` |
+
+Web 面板：http://localhost:8080（可通过 `WEB_PORT` 修改端口）
 
 ## 安装
 
@@ -353,23 +401,35 @@ pip install -r requirements.txt
 
 ## 使用
 
-### 启动流水线
+### Docker（推荐）
 
 ```bash
-# 启动定时轮询（每 5 分钟一次）
-PYTHONPATH=src python -m opennews.main
+# 启动全部服务
+docker compose -f docker/docker-compose.yml up -d
+
+# 查看日志
+docker compose -f docker/docker-compose.yml logs -f backend
+
+# 停止
+docker compose -f docker/docker-compose.yml down
 ```
 
-### 启动 Web 面板
+### 本地开发
 
 ```bash
-# 另开终端
+# 仅启动基础设施
+docker compose -f docker/docker-compose.yml up -d postgres neo4j redis
+
+# 启动流水线
+PYTHONPATH=src python -m opennews.main
+
+# 启动 Web 面板（另开终端）
 PYTHONPATH=src python web/server.py --port 8080
 ```
 
 浏览器打开 http://localhost:8080 查看结果。
 
-### 一键启动
+### 一键启动（传统方式）
 
 ```bash
 ./build.sh
