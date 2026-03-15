@@ -33,6 +33,9 @@ class RefinedGroup:
 class TopicRefineAgent:
     """调用 LLM 对聚类候选组进行精细化拆分。"""
 
+    # 单次 LLM 调用的最大标题数，超过则分批
+    _MAX_BATCH_SIZE = 20
+
     def __init__(self, config: LLMConfig | None = None):
         self.config = config or LLMConfig.load()
         self._client = LLMClient(self.config)
@@ -83,32 +86,37 @@ class TopicRefineAgent:
                 continue  # 单条无需精炼
 
             titles = [docs[i].split("\n")[0] for i in member_indices]
-            max_retries = max(0, self.config.topic_refine_max_retries)
-            refined = None
-            last_err: Exception | None = None
 
-            for attempt in range(1 + max_retries):
-                try:
-                    refined = self._call_llm_refine(titles)
-                    break
-                except Exception as e:
-                    last_err = e
-                    if attempt < max_retries:
-                        wait = 2 ** attempt  # 1s, 2s, 4s ...
-                        logger.warning(
-                            "LLM refine failed for topic %d (attempt %d/%d): %s — retrying in %ds",
-                            tid, attempt + 1, 1 + max_retries, e, wait,
-                        )
-                        time.sleep(wait)
+            # 对过大的组分批调用 LLM，每批独立精炼
+            if len(titles) > self._MAX_BATCH_SIZE:
+                logger.info(
+                    "topic %d has %d items, splitting into batches of %d for LLM refine",
+                    tid, len(titles), self._MAX_BATCH_SIZE,
+                )
+                all_refined: list[RefinedGroup] = []
+                for batch_start in range(0, len(titles), self._MAX_BATCH_SIZE):
+                    batch_titles = titles[batch_start:batch_start + self._MAX_BATCH_SIZE]
+                    batch_refined = self._call_llm_with_retry(tid, batch_titles)
+                    if batch_refined is None:
+                        # 该批次失败，保持原始索引不变
+                        for local_i in range(len(batch_titles)):
+                            all_refined.append(RefinedGroup(
+                                label_zh="未分类", label_en="Uncategorized",
+                                member_indices=[batch_start + local_i],
+                            ))
+                    else:
+                        # 将批次内的局部索引偏移到组内全局索引
+                        for rg in batch_refined:
+                            shifted = [batch_start + idx for idx in rg.member_indices]
+                            all_refined.append(RefinedGroup(
+                                label_zh=rg.label_zh, label_en=rg.label_en,
+                                member_indices=shifted,
+                            ))
+                refined = all_refined
+            else:
+                refined = self._call_llm_with_retry(tid, titles)
 
             if refined is None:
-                logger.warning(
-                    "LLM refine failed for topic %d after %d attempts (%d items), "
-                    "keeping original clustering. "
-                    "Check LLM API connectivity and config/llm.yaml settings. "
-                    "Last error: %s",
-                    tid, 1 + max_retries, len(member_indices), last_err,
-                )
                 continue
 
             if not refined or (len(refined) == 1 and
@@ -152,6 +160,33 @@ class TopicRefineAgent:
         logger.info("after LLM refine: %d clustered, %d solo",
                      clustered, len(new_assignments) - clustered)
         return new_assignments, new_labels
+
+    def _call_llm_with_retry(self, tid: int, titles: list[str]) -> list[RefinedGroup] | None:
+        """带重试的 LLM 精炼调用，失败返回 None。"""
+        max_retries = max(0, self.config.topic_refine_max_retries)
+        last_err: Exception | None = None
+
+        for attempt in range(1 + max_retries):
+            try:
+                return self._call_llm_refine(titles)
+            except Exception as e:
+                last_err = e
+                if attempt < max_retries:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "LLM refine failed for topic %d (attempt %d/%d): %s — retrying in %ds",
+                        tid, attempt + 1, 1 + max_retries, e, wait,
+                    )
+                    time.sleep(wait)
+
+        logger.warning(
+            "LLM refine failed for topic %d after %d attempts (%d items), "
+            "keeping original clustering. "
+            "Check LLM API connectivity and config/llm.yaml settings. "
+            "Last error: %s",
+            tid, 1 + max_retries, len(titles), last_err,
+        )
+        return None
 
     def _call_llm_refine(self, titles: list[str]) -> list[RefinedGroup]:
         """调用 LLM 对一组新闻标题进行主题拆分。"""

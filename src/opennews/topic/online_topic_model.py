@@ -17,6 +17,12 @@ DISTANCE_THRESHOLD = 0.35
 # 至少 2 篇才算聚合主题
 MIN_CLUSTER_SIZE = 2
 
+# 单个簇的最大容量，超过则用更严格阈值递归拆分
+MAX_CLUSTER_SIZE = 15
+
+# 递归拆分时每次收紧的距离步长
+_SPLIT_STEP = 0.05
+
 # 中文 embedding 模型
 _CHINESE_EMBED_MODEL = "BAAI/bge-base-zh-v1.5"
 
@@ -85,34 +91,59 @@ class OnlineTopicModel:
         from collections import Counter
         cluster_counts = Counter(labels)
 
+        # ── 拆分过大的簇 ──────────────────────────────
+        # 对超过 MAX_CLUSTER_SIZE 的簇，用更严格阈值递归二次聚类
+        final_clusters: list[list[int]] = []  # 每个元素是该簇包含的全局文档索引列表
+        processed_scipy_labels: set[int] = set()
+
+        for scipy_label, count in cluster_counts.items():
+            if scipy_label in processed_scipy_labels:
+                continue
+            processed_scipy_labels.add(scipy_label)
+            members = [j for j in range(n) if labels[j] == scipy_label]
+
+            if count < MIN_CLUSTER_SIZE:
+                # 独立新闻，不加入 final_clusters，后面单独处理
+                continue
+
+            if count <= MAX_CLUSTER_SIZE:
+                final_clusters.append(members)
+            else:
+                # 递归拆分
+                sub_clusters = self._split_large_cluster(members, dist, DISTANCE_THRESHOLD)
+                final_clusters.extend(sub_clusters)
+
         # ── 分配 topic_id ─────────────────────────────
         assignments: list[TopicAssignment] = [None] * n  # type: ignore
         cluster_id = 0
         solo_id = -1
-        # 映射 scipy label → topic_id
-        label_map: dict[int, int] = {}
+        assigned: set[int] = set()
 
+        for members in final_clusters:
+            if len(members) < MIN_CLUSTER_SIZE:
+                # 拆分后不足 2 篇的降为 solo
+                for j in members:
+                    title = docs[j].split("\n")[0]
+                    self._labels[solo_id] = {"zh": title, "en": title}
+                    assignments[j] = TopicAssignment(topic_id=solo_id, probability=0.0)
+                    assigned.add(j)
+                    solo_id -= 1
+                continue
+
+            best = max(members, key=lambda m: np.mean([sim[m][k] for k in members if k != m]))
+            title = docs[best].split("\n")[0]
+            self._labels[cluster_id] = {"zh": title, "en": title}
+
+            for j in members:
+                avg_sim = float(np.mean([sim[j][k] for k in members if k != j]))
+                assignments[j] = TopicAssignment(topic_id=cluster_id, probability=avg_sim)
+                assigned.add(j)
+
+            cluster_id += 1
+
+        # 处理原始聚类中的独立新闻（count < MIN_CLUSTER_SIZE）
         for i in range(n):
-            scipy_label = int(labels[i])
-            count = cluster_counts[scipy_label]
-
-            if count >= MIN_CLUSTER_SIZE:
-                # 聚合主题
-                if scipy_label not in label_map:
-                    label_map[scipy_label] = cluster_id
-                    # 找该簇内平均相似度最高的文档作为代表标题
-                    members = [j for j in range(n) if labels[j] == scipy_label]
-                    best = max(members, key=lambda m: np.mean([sim[m][k] for k in members if k != m]))
-                    title = docs[best].split("\n")[0]
-                    self._labels[cluster_id] = {"zh": title, "en": title}
-                    cluster_id += 1
-
-                tid = label_map[scipy_label]
-                members = [j for j in range(n) if labels[j] == scipy_label]
-                avg_sim = float(np.mean([sim[i][j] for j in members if j != i]))
-                assignments[i] = TopicAssignment(topic_id=tid, probability=avg_sim)
-            else:
-                # 独立新闻
+            if i not in assigned:
                 title = docs[i].split("\n")[0]
                 self._labels[solo_id] = {"zh": title, "en": title}
                 assignments[i] = TopicAssignment(topic_id=solo_id, probability=0.0)
@@ -124,6 +155,64 @@ class OnlineTopicModel:
             clustered, cluster_id, len(assignments) - clustered,
         )
         return assignments
+
+    @staticmethod
+    def _split_large_cluster(
+        members: list[int],
+        full_dist: np.ndarray,
+        current_threshold: float,
+    ) -> list[list[int]]:
+        """递归拆分超过 MAX_CLUSTER_SIZE 的簇。
+
+        每次收紧距离阈值 _SPLIT_STEP，直到所有子簇 <= MAX_CLUSTER_SIZE
+        或阈值降到 0.05 以下（兜底停止）。
+        """
+        if len(members) <= MAX_CLUSTER_SIZE:
+            return [members]
+
+        new_threshold = current_threshold - _SPLIT_STEP
+        if new_threshold < 0.05:
+            # 阈值已经很严格了，强制接受当前簇
+            logger.warning(
+                "cluster of %d items cannot be split further (threshold=%.2f), keeping as-is",
+                len(members), current_threshold,
+            )
+            return [members]
+
+        # 提取子距离矩阵
+        idx = np.array(members)
+        sub_dist = full_dist[np.ix_(idx, idx)]
+        np.fill_diagonal(sub_dist, 0.0)
+        sub_dist = np.clip(sub_dist, 0, None)
+
+        condensed = squareform(sub_dist, checks=False)
+        Z = linkage(condensed, method="complete")
+        sub_labels = fcluster(Z, t=new_threshold, criterion="distance")
+
+        from collections import Counter
+        sub_counts = Counter(sub_labels)
+
+        result: list[list[int]] = []
+        seen_labels: set[int] = set()
+        for local_i, sl in enumerate(sub_labels):
+            if sl in seen_labels:
+                continue
+            seen_labels.add(sl)
+            sub_members = [members[j] for j in range(len(members)) if sub_labels[j] == sl]
+
+            if len(sub_members) > MAX_CLUSTER_SIZE:
+                # 仍然过大，继续递归
+                result.extend(
+                    OnlineTopicModel._split_large_cluster(sub_members, full_dist, new_threshold)
+                )
+            else:
+                result.append(sub_members)
+
+        logger.info(
+            "split cluster of %d into %d sub-clusters (threshold %.2f → %.2f)",
+            len(members), len(result), current_threshold, new_threshold,
+        )
+        return result
 
     def _assign_all_solo(self, docs: list[str]) -> list[TopicAssignment]:
         assignments = []
