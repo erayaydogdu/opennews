@@ -52,9 +52,11 @@ After `extract_entities`, three branches run in parallel (BERTopic clustering / 
 
 | Service | Purpose | Required | Default Address |
 |---------|---------|----------|-----------------|
-| PostgreSQL 16+ | Primary storage | Yes | `127.0.0.1:5432` |
-| Neo4j 5+ | Knowledge graph | No (skipped if unavailable) | `bolt://127.0.0.1:7687` |
-| Redis 7+ | Temporal memory | No (falls back to in-memory) | `127.0.0.1:6379` |
+| PostgreSQL 16+ | Primary storage | Yes | Internal only (container network) |
+| Neo4j 5+ | Knowledge graph | No (skipped if unavailable) | Internal only (container network) |
+| Redis 7+ | Temporal memory | No (falls back to in-memory) | Internal only (container network) |
+
+Only the web dashboard port (default `8080`) is exposed to the host. All infrastructure services communicate through the Docker internal network.
 
 ### Quick Start with Docker
 
@@ -126,9 +128,17 @@ docker compose -f docker/docker-compose.yml down
 
 ### Local Development
 
+When developing locally outside Docker, you need the infra ports exposed on the host. Use the `--profile dev` override or start services manually:
+
 ```bash
-# Start infra only
-docker compose -f docker/docker-compose.yml up -d postgres neo4j redis
+# Start infra with host-exposed ports for local development
+docker compose -f docker/docker-compose.yml up -d postgres neo4j redis \
+  && docker compose -f docker/docker-compose.yml exec -d postgres sh -c 'echo "ports already internal"'
+
+# Or run infra separately with ports:
+docker run -d --name opennews-pg -p 5432:5432 -e POSTGRES_PASSWORD=123456 -e POSTGRES_DB=opennews postgres:16-alpine
+docker run -d --name opennews-neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/Aa123456 neo4j:5-community
+docker run -d --name opennews-redis -p 6379:6379 redis:7-alpine
 
 # Run the pipeline
 PYTHONPATH=src python -m opennews.main
@@ -161,10 +171,10 @@ All settings can be overridden via environment variables.
 | `BATCH_SIZE` | Max items per fetch | `32` |
 | `EMBEDDING_MODEL` | Embedding model | `ProsusAI/finbert` |
 | `NER_MODEL` | NER model | `dslim/bert-base-NER` |
-| `NEO4J_URI` | Neo4j connection | `bolt://127.0.0.1:7687` |
+| `NEO4J_URI` | Neo4j connection | `bolt://neo4j:7687` (Docker) / `bolt://127.0.0.1:7687` (local) |
 | `NEO4J_USER` / `NEO4J_PASSWORD` | Neo4j credentials | `neo4j` / `Aa123456` |
 | `CLASSIFIER_MODEL` | Zero-shot model | `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` |
-| `REDIS_URL` | Redis connection | `redis://127.0.0.1:6379/0` |
+| `REDIS_URL` | Redis connection | `redis://redis:6379/0` (Docker) / `redis://127.0.0.1:6379/0` (local) |
 | `MEMORY_WINDOW_DAYS` | Temporal memory window | `30` |
 | `PG_HOST` / `PG_PORT` / `PG_USER` / `PG_PASSWORD` / `PG_DATABASE` | PostgreSQL | `127.0.0.1` / `5432` / `postgres` / `123456` / `opennews` |
 | `REPORT_ENABLED` | Enable impact reports | `true` |
@@ -237,7 +247,7 @@ ORDER BY b.created_at DESC;
 
 ### Neo4j Knowledge Graph
 
-Access via Neo4j Browser at http://localhost:7474.
+Access via Neo4j Browser (requires local development setup with port `7474` exposed, see [Local Development](#local-development)).
 
 ```cypher
 -- High-impact news
@@ -352,9 +362,11 @@ OpenNews 是一个基于 LangGraph 编排的金融新闻处理流水线。自动
 
 | 服务 | 用途 | 必需 | 默认地址 |
 |------|------|------|----------|
-| PostgreSQL 16+ | 主存储 | 是 | `127.0.0.1:5432` |
-| Neo4j 5+ | 知识图谱 | 否（不可用时跳过） | `bolt://127.0.0.1:7687` |
-| Redis 7+ | 时序记忆 | 否（不可用时回退到内存） | `127.0.0.1:6379` |
+| PostgreSQL 16+ | 主存储 | 是 | 仅容器内网 |
+| Neo4j 5+ | 知识图谱 | 否（不可用时跳过） | 仅容器内网 |
+| Redis 7+ | 时序记忆 | 否（不可用时回退到内存） | 仅容器内网 |
+
+仅 Web 面板端口（默认 `8080`）对宿主机暴露，所有基础设施服务通过 Docker 内部网络通信。
 
 ### Docker 快速启动
 
@@ -416,9 +428,13 @@ docker compose -f docker/docker-compose.yml down
 
 ### 本地开发
 
+本地开发时需要基础设施端口暴露到宿主机，可手动启动：
+
 ```bash
-# 仅启动基础设施
-docker compose -f docker/docker-compose.yml up -d postgres neo4j redis
+# 手动启动基础设施（暴露端口）
+docker run -d --name opennews-pg -p 5432:5432 -e POSTGRES_PASSWORD=123456 -e POSTGRES_DB=opennews postgres:16-alpine
+docker run -d --name opennews-neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/Aa123456 neo4j:5-community
+docker run -d --name opennews-redis -p 6379:6379 redis:7-alpine
 
 # 启动流水线
 PYTHONPATH=src python -m opennews.main
@@ -506,7 +522,7 @@ ORDER BY b.created_at DESC;
 
 ### Neo4j 知识图谱
 
-通过 Neo4j Browser (http://localhost:7474) 查询：
+通过 Neo4j Browser 查询（需本地开发模式暴露 `7474` 端口，见[本地开发](#本地开发)）：
 
 ```cypher
 -- 高影响新闻
