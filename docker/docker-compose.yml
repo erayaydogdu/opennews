@@ -59,15 +59,14 @@ services:
     image: redis:7-alpine
     container_name: opennews-redis
     restart: unless-stopped
-    command: >
-      redis-server
-      --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
-      --requirepass ${REDIS_PASSWORD:-}
-      --protected-mode yes
-      --rename-command FLUSHALL ""
-      --rename-command FLUSHDB ""
-      --rename-command DEBUG ""
+    command:
+      - redis-server
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --protected-mode
+      - "yes"
     volumes:
       - ./redis:/data
     healthcheck:
