@@ -12,6 +12,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/view.png" alt="OpenNews Web Panel" width="800" />
+</p>
+
 ## 概述
 
 OpenNews 是一个基于 LangGraph 编排的金融新闻处理流水线。自动抓取多平台新闻，完成 NER 实体抽取、主题聚类、零样本分类、7 维特征提取、时序记忆聚合、DK-CoT 影响评分，并将结果写入 Neo4j 知识图谱和 PostgreSQL 数据库。内置 Web 面板支持实时浏览、筛选和查看详情。
