@@ -11,3 +11,4 @@ seeds/
 node_modules/
 web/dist/
 *.local
+.worktrees/
