@@ -145,7 +145,10 @@ docker run -d --name opennews-redis -p 6379:6379 redis:7-alpine
 # Run the pipeline
 PYTHONPATH=src python -m opennews.main
 
-# Run the web dashboard (separate terminal)
+# Build the frontend (separate terminal)
+cd web && npm install && npx vite build && cd ..
+
+# Run the web dashboard
 PYTHONPATH=src python web/server.py --port 8080
 ```
 

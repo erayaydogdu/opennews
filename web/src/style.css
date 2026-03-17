@@ -670,6 +670,52 @@ body {
   color: var(--text-dim);
 }
 
+/* ── pagination ────────────────────────────────────────── */
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  padding: 20px 0 24px;
+  white-space: nowrap;
+}
+.page-btn {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+  flex-shrink: 0;
+}
+.page-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-bright);
+  border-color: var(--border-hi);
+}
+.page-btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.page-btn:disabled {
+  opacity: .3;
+  cursor: default;
+}
+.page-ellipsis {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
 /* ── source bar ────────────────────────────────────────── */
 .source-bar {
   position: fixed;
@@ -763,9 +809,45 @@ body {
 /* ── responsive ────────────────────────────────────────── */
 @media (max-width: 768px) {
   .layout { display: block; }
+
+  /* shell: 缩减边距，占满宽度 */
+  .shell { padding: 0 10px 80px; }
+
+  /* header */
   .hdr { flex-direction: column; gap: 8px; align-items: flex-start; }
   .hdr-right { flex-wrap: wrap; }
-  /* Mobile: revert to fixed overlay */
+
+  /* chart: 缩减内边距，让图表占满 */
+  .chart-section { padding: 12px 4px 16px; margin-top: 12px; }
+  .chart-label { font-size: 13px; line-height: 20px; }
+  .range-wrap { padding: 0 6px 0 6px; }
+  .range-labels { font-size: 8px; }
+  #distChart { height: 120px; }
+
+  /* sort bar */
+  .sort-bar { gap: 4px; margin-top: 16px; }
+  .sort-btn { font-size: 10px; padding: 4px 8px; }
+
+  /* topics: 占满手机宽度 */
+  .topics { padding: 0 4px; }
+  .topic-head { gap: 8px; padding: 10px 8px; }
+  .topic-src-info { display: none; }
+  .topic-avg-score { font-size: 13px; min-width: 30px; }
+  .topic-label { font-size: 12px; }
+  .topic-time-ago { font-size: 10px; }
+  .news-list { padding: 0 4px 10px; }
+  .news-item { padding: 8px 8px; gap: 6px; flex-wrap: wrap; }
+  .news-title { min-width: 100%; order: 10; }
+  .news-score { font-size: 14px; min-width: 36px; }
+
+  /* pagination: 紧凑单行 */
+  .pagination { gap: 3px; padding: 16px 8px 20px; overflow-x: auto; justify-content: center; }
+  .page-btn { min-width: 28px; height: 28px; font-size: 11px; padding: 0 5px; }
+
+  /* source bar */
+  .source-bar { gap: 6px; padding: 8px 10px; flex-wrap: wrap; }
+
+  /* Mobile: detail panel 全屏覆盖 */
   .detail-panel {
     position: fixed;
     top: 0; right: -100%;
@@ -782,9 +864,9 @@ body {
     box-shadow: -8px 0 30px rgba(0,0,0,.5);
   }
   .detail-panel-inner { width: 100%; }
-  .news-item { flex-wrap: wrap; gap: 6px; }
-  .news-title { min-width: 100%; order: 10; }
+  .detail-body { padding: 16px 14px 40px; }
   .d-features { grid-template-columns: repeat(2, 1fr); }
+  .d-score-label { width: 80px; font-size: 10px; }
 }
 
 /* ── scrollbar ─────────────────────────────────────────── */

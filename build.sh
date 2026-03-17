@@ -139,7 +139,20 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════
-#  5. 启动前端服务
+#  5. 构建前端 Vue 项目
+# ══════════════════════════════════════════════════════════
+info "构建前端 Vue 项目..."
+if [ ! -d "$ROOT/web/node_modules" ]; then
+    info "安装前端依赖..."
+    (cd "$ROOT/web" && npm install --silent) || fail "npm install 失败"
+fi
+(cd "$ROOT/web" && npx vite build) || fail "前端构建失败"
+ok "前端构建完成 → web/dist/"
+
+echo ""
+
+# ══════════════════════════════════════════════════════════
+#  6. 启动前端服务
 # ══════════════════════════════════════════════════════════
 info "启动前端 Web 服务 (端口 $WEB_PORT)..."
 PYTHONPATH="$ROOT/src" python "$ROOT/web/server.py" --port "$WEB_PORT" &

@@ -143,7 +143,10 @@ docker run -d --name opennews-redis -p 6379:6379 redis:7-alpine
 # 启动流水线
 PYTHONPATH=src python -m opennews.main
 
-# 启动 Web 面板（另开终端）
+# 构建前端（另开终端）
+cd web && npm install && npx vite build && cd ..
+
+# 启动 Web 面板
 PYTHONPATH=src python web/server.py --port 8080
 ```
 

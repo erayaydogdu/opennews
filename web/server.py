@@ -23,7 +23,7 @@ from pathlib import Path
 
 logger = logging.getLogger("opennews.web")
 
-WEB_DIR = Path(__file__).resolve().parent
+WEB_DIR = Path(__file__).resolve().parent / "dist"
 
 # 将项目 src 加入 sys.path，以便导入 opennews 包
 _SRC = Path(__file__).resolve().parent.parent / "src"
@@ -105,7 +105,7 @@ class OpenNewsHandler(SimpleHTTPRequestHandler):
             self._json_error(str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def _handle_records(self):
-        """GET /api/records?hours=N — 获取最近 N 小时内的所有记录。"""
+        """GET /api/records?hours=N&page=P&score_lo=X&score_hi=Y — 获取最近 N 小时内的记录（按主题分页）。"""
         from urllib.parse import parse_qs, urlparse
         qs = parse_qs(urlparse(self.path).query)
         try:
@@ -113,9 +113,21 @@ class OpenNewsHandler(SimpleHTTPRequestHandler):
         except (ValueError, IndexError):
             hours = 24.0
         try:
+            page = int(qs.get("page", ["1"])[0])
+        except (ValueError, IndexError):
+            page = 1
+        try:
+            score_lo = float(qs.get("score_lo", ["0"])[0])
+        except (ValueError, IndexError):
+            score_lo = 0.0
+        try:
+            score_hi = float(qs.get("score_hi", ["100"])[0])
+        except (ValueError, IndexError):
+            score_hi = 100.0
+        try:
             db = _db()
-            records = db.get_records_since(hours)
-            self._json_response(records)
+            result = db.get_records_since(hours, page=page, score_lo=score_lo, score_hi=score_hi)
+            self._json_response(result)
         except Exception as e:
             logger.exception("get records since %s hours failed", hours)
             self._json_error(str(e), HTTPStatus.INTERNAL_SERVER_ERROR)

@@ -224,8 +224,23 @@ def get_batch_id_by_ts(batch_ts: str) -> int | None:
             return row[0] if row else None
 
 
-def get_records_since(hours: float) -> list[dict]:
-    """获取最近 N 小时内的记录（按 news_url 去重，保留最新）。"""
+def get_records_since(
+    hours: float,
+    page: int = 1,
+    per_page: int = 15,
+    score_lo: float = 0,
+    score_hi: float = 100,
+) -> dict:
+    """获取最近 N 小时内的记录（按 news_url 去重，保留最新），按主题分页。
+
+    分页基于筛选（score_lo/score_hi）后的主题；
+    全局统计（total_items / above60 / score_bins / levels）始终基于全量数据。
+
+    Returns:
+        {"items": [...], "page": int, "total_pages": int, ...}
+    """
+    import math
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -237,14 +252,71 @@ def get_records_since(hours: float) -> list[dict]:
                 "ORDER BY COALESCE(br.news_url, br.id::text), br.id DESC",
                 (hours,),
             )
-            records = []
+            all_records = []
             for row in cur.fetchall():
                 bid, payload = row[0], row[1]
                 topic = payload.get("topic")
                 if topic and "batch_id" not in topic:
                     topic["batch_id"] = bid
-                records.append(payload)
-            return records
+                all_records.append(payload)
+
+    # ── 全局统计（不受筛选 & 分页影响） ──────────────────
+    total_items = len(all_records)
+    above60 = sum(1 for r in all_records if (r.get("report") or {}).get("final_score", 0) >= 60)
+    score_bins = [0] * 100
+    levels: dict[str, int] = {"高": 0, "中": 0, "低": 0}
+    for r in all_records:
+        report = r.get("report") or {}
+        s = report.get("final_score", 0)
+        idx = min(99, max(0, int(s)))
+        score_bins[idx] += 1
+        level = report.get("impact_level")
+        if level in levels:
+            levels[level] += 1
+
+    # ── 按分数筛选 ───────────────────────────────────────
+    filtered = [
+        r for r in all_records
+        if score_lo <= (r.get("report") or {}).get("final_score", 0) <= score_hi
+    ]
+
+    # 按主题分组
+    groups: dict[str, list[dict]] = {}
+    for rec in filtered:
+        topic = rec.get("topic") or {}
+        tid = topic.get("topic_id", -1)
+        bid = topic.get("batch_id", 0)
+        key = f"{bid}:{tid}"
+        groups.setdefault(key, []).append(rec)
+
+    # 按主题内最高分降序排列
+    sorted_keys = sorted(
+        groups.keys(),
+        key=lambda k: max((r.get("report", {}).get("final_score", 0) for r in groups[k]), default=0),
+        reverse=True,
+    )
+
+    total_topics = len(sorted_keys)
+    total_pages = max(1, math.ceil(total_topics / per_page))
+    page = max(1, min(page, total_pages))
+
+    start = (page - 1) * per_page
+    page_keys = sorted_keys[start:start + per_page]
+
+    items = []
+    for k in page_keys:
+        items.extend(groups[k])
+
+    return {
+        "items": items,
+        "page": page,
+        "total_pages": total_pages,
+        "total_topics": total_topics,
+        "total_items": total_items,
+        "above60": above60,
+        "score_bins": score_bins,
+        "levels": levels,
+    }
 
 
 # ── 未翻译标签重试 ─────────────────────────────────────
