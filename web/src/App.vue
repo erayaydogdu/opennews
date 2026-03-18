@@ -41,6 +41,7 @@
   </div>
   <SourceBar
     v-model="source"
+    :topic-lang="topicLang"
     @load="onSourceLoad"
     @import-json="onImportJson"
   />
@@ -70,7 +71,7 @@ const filteredItems = ref<BatchItem[]>([])
 const rangeLo = ref(50)
 const rangeHi = ref(100)
 const sortMode = ref<SortMode>('score')
-const topicLang = ref<TopicLang>((localStorage.getItem('topicLang') as TopicLang) || 'zh')
+const topicLang = ref<TopicLang>((localStorage.getItem('topicLang') as TopicLang) || 'en')
 const activeNewsId = ref<string | null>(null)
 const source = ref('hours:24')
 const currentPage = ref(1)

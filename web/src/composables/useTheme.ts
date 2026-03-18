@@ -8,7 +8,7 @@ export function useTheme() {
   if (saved) {
     isLight.value = saved === 'light'
   } else {
-    isLight.value = !window.matchMedia('(prefers-color-scheme: dark)').matches
+    isLight.value = true
   }
 
   watchEffect(() => {
