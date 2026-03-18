@@ -15,6 +15,7 @@
           v-for="item in sortedItems"
           :key="item.news?.news_id"
           :item="item"
+          :topic-lang="topicLang"
           :active-news-id="activeNewsId"
           @select="$emit('selectNews', $event)"
         />
@@ -25,12 +26,13 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { TopicGroup } from '@/types'
+import type { TopicGroup, TopicLang } from '@/types'
 import { scoreColor, sourceName, fmtTimeAgo } from '@/utils'
 import NewsItem from './NewsItem.vue'
 
 const props = defineProps<{
   group: TopicGroup
+  topicLang: TopicLang
   activeNewsId: string | null
   wasOpen?: boolean
 }>()

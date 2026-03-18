@@ -7,6 +7,7 @@
       v-for="g in groups"
       :key="g.topic_id"
       :group="g"
+      :topic-lang="topicLang"
       :active-news-id="activeNewsId"
       :was-open="openTopics.has(g.topic_id)"
       @select-news="$emit('selectNews', $event)"
