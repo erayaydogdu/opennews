@@ -4,7 +4,6 @@
       <AppHeader
         :topic-lang="topicLang"
         :stats="stats"
-        @update:topic-lang="topicLang = $event"
       />
       <ChartSection
         ref="chartRef"
@@ -44,6 +43,7 @@
     :topic-lang="topicLang"
     @load="onSourceLoad"
     @import-json="onImportJson"
+    @update:topic-lang="topicLang = $event"
   />
 </template>
 
