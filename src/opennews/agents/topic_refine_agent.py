@@ -1,8 +1,8 @@
-"""Topic Refine Agent — 使用 LLM 对聚类结果进行主题精炼。
+"""Topic Refine Agent — uses LLM to refine clustering results for topic refinement.
 
-解决纯 embedding 相似度聚类的误聚合问题：
-将候选组内的新闻发给 LLM，让其判断哪些真正属于同一主题，
-并拆分不相关的新闻为独立子组。
+Solves the mis-aggregation problem of pure embedding similarity clustering:
+sends candidate group news to LLM to determine which truly belong to the same topic,
+and splits unrelated news into independent sub-groups.
 """
 from __future__ import annotations
 
@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class RefinedGroup:
-    """LLM 精炼后的一个主题子组。"""
+    """A topic sub-group after LLM refinement."""
     label_zh: str
     label_en: str
-    member_indices: list[int]  # 在原始候选组中的索引
+    member_indices: list[int]  # Indices in the original candidate group
 
     @property
     def label_dict(self) -> dict[str, str]:
@@ -31,9 +31,9 @@ class RefinedGroup:
 
 
 class TopicRefineAgent:
-    """调用 LLM 对聚类候选组进行精细化拆分。"""
+    """Calls LLM to perform fine-grained splitting of clustering candidate groups."""
 
-    # 单次 LLM 调用的最大标题数，超过则分批
+    # Max titles per LLM call; batched if exceeded
     _MAX_BATCH_SIZE = 20
 
     def __init__(self, config: LLMConfig | None = None):
@@ -46,15 +46,15 @@ class TopicRefineAgent:
         assignments: list[TopicAssignment],
         labels: dict[int, dict[str, str]],
     ) -> tuple[list[TopicAssignment], dict[int, dict[str, str]]]:
-        """对聚类结果进行 LLM 精炼。
+        """Refine clustering results with LLM.
 
         Args:
-            docs: 新闻文档列表（title\\ncontent）
-            assignments: 原始聚类分配
-            labels: 原始 topic_id → {"zh": "...", "en": "..."} 映射
+            docs: News document list (title\\ncontent)
+            assignments: Original clustering assignments
+            labels: Original topic_id → {"zh": "...", "en": "..."} mapping
 
         Returns:
-            (refined_assignments, refined_labels) 精炼后的分配和双语标签
+            (refined_assignments, refined_labels) Refined assignments and bilingual labels
         """
         if not self.config.topic_refine_enabled:
             logger.info("topic refine disabled, skipping")
@@ -64,7 +64,7 @@ class TopicRefineAgent:
             logger.warning("LLM api_key not configured, skipping topic refine")
             return assignments, labels
 
-        # 按 topic_id 分组（只处理 ≥0 的聚合主题，solo 不需要精炼）
+        # Group by topic_id (only process aggregated topics >=0; solo items don't need refining)
         groups: dict[int, list[int]] = {}
         for i, a in enumerate(assignments):
             if a.topic_id >= 0:
@@ -73,8 +73,8 @@ class TopicRefineAgent:
         if not groups:
             return assignments, labels
 
-        # 构建新的分配结果
-        new_assignments = list(assignments)  # 浅拷贝
+        # Build new assignment results
+        new_assignments = list(assignments)  # Shallow copy
         new_labels = dict(labels)
         next_topic_id = max((a.topic_id for a in assignments), default=-1) + 1
         next_solo_id = min((a.topic_id for a in assignments), default=0)
@@ -83,11 +83,11 @@ class TopicRefineAgent:
 
         for tid, member_indices in groups.items():
             if len(member_indices) <= 1:
-                continue  # 单条无需精炼
+                continue  # Single item, no refinement needed
 
             titles = [docs[i].split("\n")[0] for i in member_indices]
 
-            # 对过大的组分批调用 LLM，每批独立精炼
+            # Batch LLM calls for oversized groups, each batch refined independently
             if len(titles) > self._MAX_BATCH_SIZE:
                 logger.info(
                     "topic %d has %d items, splitting into batches of %d for LLM refine",
@@ -98,14 +98,14 @@ class TopicRefineAgent:
                     batch_titles = titles[batch_start:batch_start + self._MAX_BATCH_SIZE]
                     batch_refined = self._call_llm_with_retry(tid, batch_titles)
                     if batch_refined is None:
-                        # 该批次失败，保持原始索引不变
+                        # This batch failed, keep original indices
                         for local_i in range(len(batch_titles)):
                             all_refined.append(RefinedGroup(
-                                label_zh="未分类", label_en="Uncategorized",
+                                label_zh="Uncategorized", label_en="Uncategorized",
                                 member_indices=[batch_start + local_i],
                             ))
                     else:
-                        # 将批次内的局部索引偏移到组内全局索引
+                        # Offset local batch indices to group-global indices
                         for rg in batch_refined:
                             shifted = [batch_start + idx for idx in rg.member_indices]
                             all_refined.append(RefinedGroup(
@@ -121,29 +121,29 @@ class TopicRefineAgent:
 
             if not refined or (len(refined) == 1 and
                     sorted(refined[0].member_indices) == list(range(len(titles)))):
-                # LLM 认为全部属于同一主题，保持不变
+                # LLM considers all items as same topic, keep unchanged
                 continue
 
             logger.info("topic %d split into %d sub-groups by LLM", tid, len(refined))
 
-            # 第一个子组继承原 topic_id
+            # First sub-group inherits original topic_id
             first = True
             for rg in refined:
                 if not rg.member_indices:
                     continue
 
                 if first:
-                    # 继承原 topic_id，更新 label
+                    # Inherit original topic_id, update label
                     use_tid = tid
                     new_labels[use_tid] = rg.label_dict
                     first = False
                 elif len(rg.member_indices) == 1:
-                    # 单条新闻 → solo
+                    # Single news item → solo
                     use_tid = next_solo_id
                     new_labels[use_tid] = rg.label_dict
                     next_solo_id -= 1
                 else:
-                    # 新的聚合主题
+                    # New aggregated topic
                     use_tid = next_topic_id
                     new_labels[use_tid] = rg.label_dict
                     next_topic_id += 1
@@ -160,40 +160,40 @@ class TopicRefineAgent:
         logger.info("after LLM refine: %d clustered, %d solo",
                      clustered, len(new_assignments) - clustered)
 
-        # ── 批量翻译未生成双语标签的主题 ──────────────
-        # 聚类阶段和 LLM 失败时 label 的 zh/en 相同（都是原标题），需要补翻译
+        # ── Batch-translate topics missing bilingual labels ──────────────
+        # When clustering or LLM fails, label zh/en are identical (both original title); need supplementary translation
         new_labels = self._translate_missing_labels(new_labels)
 
-        # ── 兜底：LLM 翻译也失败时，用规则区分中英文 ──────
+        # ── Fallback: when LLM translation also fails, use rules to distinguish Chinese/English ──────
         new_labels = self._fallback_bilingual(new_labels)
 
         return new_assignments, new_labels
 
-    # ── 重试未翻译标签 ────────────────────────────────────
+    # ── Retry untranslated labels ────────────────────────────────────
 
     def retry_failed_labels(
         self, failed: list[tuple[int, dict[str, str]]],
     ) -> list[tuple[int, dict[str, str]]]:
-        """对带 [EN]/[ZH] 前缀的标签重新调用 LLM 翻译。
+        """Retry LLM translation for labels with [EN]/[ZH] prefix.
 
         Args:
             failed: [(record_id, {"zh": "...", "en": "..."}), ...]
 
         Returns:
-            成功翻译的 [(record_id, {"zh": "...", "en": "..."}), ...]
+            Successfully translated [(record_id, {"zh": "...", "en": "..."}), ...]
         """
         if not self.config.api_key or not failed:
             return []
 
-        # 还原原始文本：去掉 [EN]/[ZH] 前缀，使 zh==en 以触发翻译逻辑
+        # Restore original text: strip [EN]/[ZH] prefix, set zh==en to trigger translation logic
         restore_map: dict[int, tuple[int, str]] = {}  # fake_tid → (record_id, original_text)
         labels: dict[int, dict[str, str]] = {}
         for i, (record_id, lbl) in enumerate(failed):
             zh, en = lbl.get("zh", ""), lbl.get("en", "")
             if zh.startswith("[EN] "):
-                original = en  # en 是原始英文
+                original = en  # en is the original English
             elif en.startswith("[ZH] "):
-                original = zh  # zh 是原始中文
+                original = zh  # zh is the original Chinese
             else:
                 continue
             fake_tid = -(10000 + i)
@@ -209,7 +209,7 @@ class TopicRefineAgent:
         results: list[tuple[int, dict[str, str]]] = []
         for fake_tid, new_lbl in translated.items():
             zh, en = new_lbl.get("zh", ""), new_lbl.get("en", "")
-            # 只保留真正翻译成功的（zh != en 且无前缀）
+            # Only keep truly successful translations (zh != en and no prefix)
             if zh and en and zh != en and not zh.startswith("[EN]") and not en.startswith("[ZH]"):
                 record_id, _ = restore_map[fake_tid]
                 results.append((record_id, new_lbl))
@@ -217,11 +217,11 @@ class TopicRefineAgent:
         logger.info("successfully re-translated %d/%d labels", len(results), len(labels))
         return results
 
-    # ── 本地规则兜底 ──────────────────────────────────────
+    # ── Local rule fallback ──────────────────────────────────────
 
     @staticmethod
     def _is_mostly_chinese(text: str) -> bool:
-        """判断文本是否以中文字符为主。"""
+        """Determine whether text is predominantly Chinese characters."""
         if not text:
             return False
         cjk = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
@@ -231,35 +231,35 @@ class TopicRefineAgent:
     def _fallback_bilingual(
         labels: dict[int, dict[str, str]],
     ) -> dict[int, dict[str, str]]:
-        """LLM 翻译全部失败时的本地兜底：根据文本语种将另一语言设为带标记的占位。
+        """Local fallback when LLM translation completely fails: set the other language to a prefixed placeholder based on text language.
 
-        如果原标题是中文，en 设为 "[ZH] 原标题"；
-        如果原标题是英文，zh 设为 "[EN] 原标题"。
-        这样前端至少能区分哪个是原始语言、哪个是占位。
+        If the original title is Chinese, en is set to "[ZH] original_title";
+        if the original title is English, zh is set to "[EN] original_title".
+        This way the frontend can at least distinguish which is the original language and which is a placeholder.
         """
         result = dict(labels)
         for tid, lbl in result.items():
             zh, en = lbl.get("zh", ""), lbl.get("en", "")
             if zh != en or not zh:
-                continue  # 已经不同，跳过
+                continue  # Already different, skip
             if TopicRefineAgent._is_mostly_chinese(zh):
                 result[tid] = {"zh": zh, "en": f"[ZH] {zh}"}
             else:
                 result[tid] = {"zh": f"[EN] {en}", "en": en}
         return result
 
-    # ── 批量翻译 ──────────────────────────────────────────
+    # ── Batch translation ──────────────────────────────────────────
 
-    _TRANSLATE_BATCH_SIZE = 40  # 单次翻译请求的最大条目数
+    _TRANSLATE_BATCH_SIZE = 40  # Max items per translation request
 
     def _translate_missing_labels(
         self, labels: dict[int, dict[str, str]],
     ) -> dict[int, dict[str, str]]:
-        """对 zh == en 的 label 批量调用 LLM 生成缺失的另一语言标签。"""
+        """Batch-call LLM to generate missing language labels for entries where zh == en."""
         if not self.config.api_key:
             return labels
 
-        # 收集需要翻译的 topic_id 和对应标题
+        # Collect topic_ids and titles that need translation
         to_translate: list[tuple[int, str]] = []
         for tid, lbl in labels.items():
             if lbl.get("zh") == lbl.get("en") and lbl.get("zh"):
@@ -284,22 +284,22 @@ class TopicRefineAgent:
     def _call_translate_batch(
         self, items: list[tuple[int, str]],
     ) -> list[tuple[str, str]] | None:
-        """批量翻译标题，返回 [(zh, en), ...] 或 None。"""
+        """Batch-translate titles, return [(zh, en), ...] or None."""
         numbered = "\n".join(f"[{i}] {title}" for i, (_, title) in enumerate(items))
 
         system = (
-            "你是一个多语言新闻标题翻译专家。"
-            "你需要为每条新闻标题同时提供简洁的中文主题标签和英文主题标签。"
-            "如果原标题是中文，生成对应的英文标签；如果原标题是英文，生成对应的中文标签。"
-            "标签应概括新闻核心内容，10~20字（中文）或 5~10 words（英文）。"
+            "You are a multilingual news headline translation expert. "
+            "You need to provide concise Chinese and English topic labels for each news headline. "
+            "If the original title is Chinese, generate the corresponding English label; if the original title is English, generate the corresponding Chinese label. "
+            "Labels should summarize the core news content, 10-20 characters (Chinese) or 5-10 words (English)."
         )
         user = (
-            f"为以下新闻标题生成双语主题标签：\n\n{numbered}\n\n"
-            '输出严格 JSON 数组：\n'
-            '[{"zh": "中文标签", "en": "English label"}]\n\n'
-            "要求：\n"
-            "1. 数组长度与输入条目数一致，顺序对应\n"
-            "2. 只输出 JSON 数组"
+            f"Generate bilingual topic labels for the following news headlines:\n\n{numbered}\n\n"
+            'Output strict JSON array:\n'
+            '[{"zh": "Chinese label", "en": "English label"}]\n\n'
+            "Requirements:\n"
+            "1. Array length must match the number of input entries, in corresponding order\n"
+            "2. Output only the JSON array"
         )
 
         try:
@@ -312,7 +312,7 @@ class TopicRefineAgent:
 
     @staticmethod
     def _parse_translate_response(raw: str, expected: int) -> list[tuple[str, str]] | None:
-        """解析翻译 LLM 返回的 JSON 数组。"""
+        """Parse the JSON array returned by the translation LLM."""
         json_match = re.search(r"```(?:json)?\s*(.*?)```", raw, re.DOTALL)
         text = json_match.group(1).strip() if json_match else raw.strip()
 
@@ -345,14 +345,14 @@ class TopicRefineAgent:
             else:
                 result.append(None)
 
-        # 补齐不足的部分
+        # Pad insufficient entries
         while len(result) < expected:
             result.append(None)
 
         return result
 
     def _call_llm_with_retry(self, tid: int, titles: list[str]) -> list[RefinedGroup] | None:
-        """带重试的 LLM 精炼调用，失败返回 None。"""
+        """LLM refinement call with retries, returns None on failure."""
         max_retries = max(0, self.config.topic_refine_max_retries)
         last_err: Exception | None = None
 
@@ -379,29 +379,29 @@ class TopicRefineAgent:
         return None
 
     def _call_llm_refine(self, titles: list[str]) -> list[RefinedGroup]:
-        """调用 LLM 对一组新闻标题进行主题拆分。"""
+        """Call LLM to perform topic splitting on a group of news headlines."""
         news_list = "\n".join(f"[{i}] {t}" for i, t in enumerate(titles))
 
         system = self.config.topic_refine_system_prompt
         user_template = self.config.topic_refine_user_prompt_template
 
         if not system or not user_template:
-            # 使用内置默认 prompt
+            # Use built-in default prompt
             system = (
-                "你是一个新闻主题聚类分析师。"
-                "你擅长从一组新闻标题中识别出哪些报道的是同一件事或同一个话题，哪些只是表面相似但实际无关。"
-                "判断标准是新闻所讨论的核心事件、主体和因果关系，而非共享的宽泛关键词或领域。"
+                "You are a news topic clustering analyst. "
+                "You excel at identifying which news headlines report on the same event or topic, and which are only superficially similar but actually unrelated. "
+                "The criteria are the core event, subject, and causal relationship discussed in the news, not shared broad keywords or domain."
             )
             user_template = (
-                "以下新闻被初步判定为同一主题，请重新审视并分组：\n\n{news_list}\n\n"
-                "将真正讨论同一事件/话题的新闻归为一组，不相关的拆分出去。\n\n"
-                '输出严格 JSON：\n'
-                '{{"groups": [{{"label_zh": "概括的中文主题标签，10~20字适宜", "label_en": "Concise English topic label, 5-10 words", "indices": [0, 2]}}]}}\n\n'
-                "要求：\n"
-                "1. indices 为新闻序号（从 0 开始），每条新闻只能出现一次\n"
-                "2. 与组内其他新闻无关的，单独成组\n"
-                "3. label_zh 应准确概括该组的共同话题（中文），label_en 为对应的英文主题标签\n"
-                "4. 只输出 JSON"
+                "The following news items were preliminarily grouped as the same topic. Please re-examine and regroup:\n\n{news_list}\n\n"
+                "Group news that truly discusses the same event/topic together, and split out unrelated ones.\n\n"
+                'Output strict JSON:\n'
+                '{{"groups": [{{"label_zh": "Summarized Chinese topic label, 10-20 chars", "label_en": "Concise English topic label, 5-10 words", "indices": [0, 2]}}]}}\n\n'
+                "Requirements:\n"
+                "1. indices are news sequence numbers (starting from 0), each news item can only appear once\n"
+                "2. News unrelated to the rest of the group should be split into its own group\n"
+                "3. label_zh should accurately summarize the group's common topic (Chinese), label_en is the corresponding English topic label\n"
+                "4. Output only JSON"
             )
 
         user = user_template.replace("{news_list}", news_list)
@@ -410,15 +410,15 @@ class TopicRefineAgent:
 
     @staticmethod
     def _parse_response(raw: str, n_titles: int) -> list[RefinedGroup]:
-        """解析 LLM 返回的 JSON，容错处理。"""
-        # 提取 JSON 块（兼容 markdown code block）
+        """Parse JSON returned by LLM, with error tolerance."""
+        # Extract JSON block (compatible with markdown code block)
         json_match = re.search(r"```(?:json)?\s*(.*?)```", raw, re.DOTALL)
         text = json_match.group(1).strip() if json_match else raw.strip()
 
         try:
             data = json.loads(text)
         except json.JSONDecodeError:
-            # 尝试修复常见问题：提取第一个 { ... }
+            # Try to fix common issues: extract first { ... }
             brace_match = re.search(r"\{.*\}", text, re.DOTALL)
             if brace_match:
                 try:
@@ -437,18 +437,18 @@ class TopicRefineAgent:
         seen = set()
         result = []
         for g in groups_raw:
-            label_zh = g.get("label_zh") or g.get("label", "未知主题")
+            label_zh = g.get("label_zh") or g.get("label", "Unknown Topic")
             label_en = g.get("label_en", label_zh)
             indices = g.get("indices", [])
-            # 过滤无效索引和重复
+            # Filter invalid indices and duplicates
             valid = [i for i in indices if isinstance(i, int) and 0 <= i < n_titles and i not in seen]
             seen.update(valid)
             if valid:
                 result.append(RefinedGroup(label_zh=label_zh, label_en=label_en, member_indices=valid))
 
-        # 补全遗漏的新闻（LLM 可能漏掉某些）
+        # Fill in missing news items (LLM may have omitted some)
         missing = [i for i in range(n_titles) if i not in seen]
         for i in missing:
-            result.append(RefinedGroup(label_zh="未分类", label_en="Uncategorized", member_indices=[i]))
+            result.append(RefinedGroup(label_zh="Uncategorized", label_en="Uncategorized", member_indices=[i]))
 
         return result

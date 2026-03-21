@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ── 颜色 ──────────────────────────────────────────────────
+# ── Colors ──────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -13,7 +13,7 @@ ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 fail()  { echo -e "${RED}[FAIL]${NC}  $*"; exit 1; }
 
-# ── 配置（可通过环境变量覆盖） ────────────────────────────
+# ── Config (overridable via environment variables) ────────────────────────────
 NEO4J_HOST="${NEO4J_HOST:-127.0.0.1}"
 NEO4J_BOLT_PORT="${NEO4J_BOLT_PORT:-7687}"
 REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
@@ -22,104 +22,104 @@ PG_HOST="${PG_HOST:-127.0.0.1}"
 PG_PORT="${PG_PORT:-5432}"
 WEB_PORT="${WEB_PORT:-8081}"
 
-# 项目根目录 = 脚本所在目录
+# Project root = script directory
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
 BACKEND_PID=""
 FRONTEND_PID=""
 
-# ── 清理函数 ──────────────────────────────────────────────
+# ── Cleanup function ──────────────────────────────────────────────
 cleanup() {
     echo ""
-    info "正在关闭服务..."
-    [ -n "$FRONTEND_PID" ] && kill "$FRONTEND_PID" 2>/dev/null && info "前端已停止 (PID $FRONTEND_PID)"
-    [ -n "$BACKEND_PID" ]  && kill "$BACKEND_PID"  2>/dev/null && info "后端已停止 (PID $BACKEND_PID)"
+    info "Shutting down services..."
+    [ -n "$FRONTEND_PID" ] && kill "$FRONTEND_PID" 2>/dev/null && info "Frontend stopped (PID $FRONTEND_PID)"
+    [ -n "$BACKEND_PID" ]  && kill "$BACKEND_PID"  2>/dev/null && info "Backend stopped (PID $BACKEND_PID)"
     wait 2>/dev/null
-    info "已退出"
+    info "Exited"
 }
 trap cleanup EXIT INT TERM
 
 # ══════════════════════════════════════════════════════════
-#  1. 依赖服务检查
+#  1. Dependency service check
 # ══════════════════════════════════════════════════════════
-info "检查依赖服务..."
+info "Checking dependency services..."
 
-# ── Neo4j (Bolt 端口) ────────────────────────────────────
+# ── Neo4j (Bolt port) ────────────────────────────────────
 if (netstat -tlnp 2>&1 || true) | grep -q ":${NEO4J_BOLT_PORT}\b"; then
-    ok "Neo4j 已就绪 ($NEO4J_HOST:$NEO4J_BOLT_PORT)"
+    ok "Neo4j ready ($NEO4J_HOST:$NEO4J_BOLT_PORT)"
 else
-    fail "Neo4j 未启动 — 请先运行: cd docker/neo4j && docker compose up -d"
+    fail "Neo4j not running — please start first: cd docker/neo4j && docker compose up -d"
 fi
 
 # ── Redis ─────────────────────────────────────────────────
 if (netstat -tlnp 2>&1 || true) | grep -q ":${REDIS_PORT}\b"; then
-    ok "Redis 已就绪 ($REDIS_HOST:$REDIS_PORT)"
+    ok "Redis ready ($REDIS_HOST:$REDIS_PORT)"
 else
-    fail "Redis 未启动 — 请先运行: docker run -d --name opennews-redis -p 6379:6379 redis:7"
+    fail "Redis not running — please start first: docker run -d --name opennews-redis -p 6379:6379 redis:7"
 fi
 
 # ── PostgreSQL ────────────────────────────────────────────
 if (netstat -tlnp 2>&1 || true) | grep -q ":${PG_PORT}\b"; then
-    ok "PostgreSQL 已就绪 ($PG_HOST:$PG_PORT)"
+    ok "PostgreSQL ready ($PG_HOST:$PG_PORT)"
 else
-    fail "PostgreSQL 未启动 — 请确保 PostgreSQL 运行在 $PG_HOST:$PG_PORT"
+    fail "PostgreSQL not running — please ensure PostgreSQL is running on $PG_HOST:$PG_PORT"
 fi
 
 echo ""
 
 # ══════════════════════════════════════════════════════════
-#  2. 安装 Python 依赖
+#  2. Install Python dependencies
 # ══════════════════════════════════════════════════════════
-info "检查 Python 依赖..."
+info "Checking Python dependencies..."
 if pip install -q -r "$ROOT/requirements.txt" 2>&1 | tail -1; then
-    ok "Python 依赖已就绪"
+    ok "Python dependencies ready"
 else
-    fail "依赖安装失败，请检查 requirements.txt"
+    fail "Dependency installation failed, check requirements.txt"
 fi
 
 # ══════════════════════════════════════════════════════════
-#  3. 初始化 PostgreSQL 数据库
+#  3. Initialize PostgreSQL database
 # ══════════════════════════════════════════════════════════
 PG_USER="${PG_USER:-postgres}"
 PG_PASSWORD="${PG_PASSWORD:-123456}"
 PG_DATABASE="${PG_DATABASE:-opennews}"
 
-info "检查数据库 ${PG_DATABASE}..."
+info "Checking database ${PG_DATABASE}..."
 if PGPASSWORD="$PG_PASSWORD" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" \
     -lqt 2>/dev/null | cut -d'|' -f1 | grep -qw "$PG_DATABASE"; then
-    ok "数据库 ${PG_DATABASE} 已存在"
+    ok "Database ${PG_DATABASE} exists"
 else
-    info "创建数据库 ${PG_DATABASE}..."
+    info "Creating database ${PG_DATABASE}..."
     if PGPASSWORD="$PG_PASSWORD" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" \
         -c "CREATE DATABASE ${PG_DATABASE};" 2>/dev/null; then
-        ok "数据库 ${PG_DATABASE} 创建成功"
+        ok "Database ${PG_DATABASE} created successfully"
     else
-        fail "无法创建数据库 ${PG_DATABASE}，请手动执行: psql -U $PG_USER -c \"CREATE DATABASE ${PG_DATABASE};\""
+        fail "Cannot create database ${PG_DATABASE}, please run manually: psql -U $PG_USER -c \"CREATE DATABASE ${PG_DATABASE};\""
     fi
 fi
 
 echo ""
 
 # ══════════════════════════════════════════════════════════
-#  4. 启动后端服务
+#  4. Start backend service
 # ══════════════════════════════════════════════════════════
-info "启动后端流水线..."
+info "Starting backend pipeline..."
 PYTHONPATH="$ROOT/src" python -m opennews.main &
 BACKEND_PID=$!
-info "后端 PID: $BACKEND_PID"
+info "Backend PID: $BACKEND_PID"
 
-# 等待后端正常启动（检测进程存活 + PG 建表完成）
-info "等待后端初始化..."
+# Wait for backend to start (check process alive + PG tables created)
+info "Waiting for backend initialization..."
 MAX_WAIT=60
 WAITED=0
 while [ $WAITED -lt $MAX_WAIT ]; do
-    # 进程挂了就直接退出
+    # Exit immediately if process died
     if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
-        fail "后端进程异常退出，请检查日志"
+        fail "Backend process exited abnormally, check logs"
     fi
 
-    # 检测 PG 中 batches 表是否已创建（说明后端已完成初始化）
+    # Check if batches table is created in PG (indicates backend initialization complete)
     if PGPASSWORD="${PG_PASSWORD:-123456}" psql -h "$PG_HOST" -p "$PG_PORT" \
         -U "${PG_USER:-postgres}" -d "${PG_DATABASE:-opennews}" \
         -c "SELECT 1 FROM batches LIMIT 0" >/dev/null 2>&1; then
@@ -128,51 +128,51 @@ while [ $WAITED -lt $MAX_WAIT ]; do
 
     sleep 2
     WAITED=$((WAITED + 2))
-    printf "\r${CYAN}[INFO]${NC}  已等待 %ds / %ds..." "$WAITED" "$MAX_WAIT"
+    printf "\r${CYAN}[INFO]${NC}  Waited %ds / %ds..." "$WAITED" "$MAX_WAIT"
 done
 echo ""
 
 if [ $WAITED -ge $MAX_WAIT ]; then
-    warn "等待超时，后端可能仍在加载模型（首次启动需下载 ~1.5GB），前端将先行启动"
+    warn "Wait timed out, backend may still be loading models (first run downloads ~1.5GB), starting frontend ahead"
 else
-    ok "后端已就绪"
+    ok "Backend ready"
 fi
 
 # ══════════════════════════════════════════════════════════
-#  5. 构建前端 Vue 项目
+#  5. Build frontend Vue project
 # ══════════════════════════════════════════════════════════
-info "构建前端 Vue 项目..."
+info "Building frontend Vue project..."
 if [ ! -d "$ROOT/web/node_modules" ]; then
-    info "安装前端依赖..."
-    (cd "$ROOT/web" && npm install --silent) || fail "npm install 失败"
+    info "Installing frontend dependencies..."
+    (cd "$ROOT/web" && npm install --silent) || fail "npm install failed"
 fi
-(cd "$ROOT/web" && npx vite build) || fail "前端构建失败"
-ok "前端构建完成 → web/dist/"
+(cd "$ROOT/web" && npx vite build) || fail "Frontend build failed"
+ok "Frontend build complete → web/dist/"
 
 echo ""
 
 # ══════════════════════════════════════════════════════════
-#  6. 启动前端服务
+#  6. Start frontend service
 # ══════════════════════════════════════════════════════════
-info "启动前端 Web 服务 (端口 $WEB_PORT)..."
+info "Starting frontend web service (port $WEB_PORT)..."
 PYTHONPATH="$ROOT/src" python "$ROOT/web/server.py" --port "$WEB_PORT" &
 FRONTEND_PID=$!
 sleep 1
 
 if kill -0 "$FRONTEND_PID" 2>/dev/null; then
-    ok "前端已启动 → http://localhost:$WEB_PORT"
+    ok "Frontend started → http://localhost:$WEB_PORT"
 else
-    fail "前端启动失败，请检查端口 $WEB_PORT 是否被占用"
+    fail "Frontend failed to start, check if port $WEB_PORT is in use"
 fi
 
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  OpenNews 已启动${NC}"
-echo -e "${GREEN}  后端 PID: $BACKEND_PID${NC}"
-echo -e "${GREEN}  前端地址: http://localhost:$WEB_PORT${NC}"
-echo -e "${GREEN}  按 Ctrl+C 停止所有服务${NC}"
+echo -e "${GREEN}  OpenNews started${NC}"
+echo -e "${GREEN}  Backend PID: $BACKEND_PID${NC}"
+echo -e "${GREEN}  Frontend URL: http://localhost:$WEB_PORT${NC}"
+echo -e "${GREEN}  Press Ctrl+C to stop all services${NC}"
 echo -e "${GREEN}════════════════════════════════════════════════${NC}"
 echo ""
 
-# 前台等待，Ctrl+C 触发 cleanup
+# Wait in foreground, Ctrl+C triggers cleanup
 wait

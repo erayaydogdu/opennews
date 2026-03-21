@@ -1,9 +1,9 @@
-"""PostgreSQL 持久化层 — 批次数据 & 报告存储。
+"""PostgreSQL persistence layer — batch data & report storage.
 
-表结构：
-  batches       — 每轮流水线产出一行（batch_id, created_at, record_count）
-  batch_records — 每条新闻的完整分析结果（JSON 存储，关联 batch_id）
-  reports       — Markdown 报告 & 摘要（关联 batch_id）
+Table structure:
+  batches       — one row per pipeline run (batch_id, created_at, record_count)
+  batch_records — full analysis result for each news item (JSON, linked to batch_id)
+  reports       — Markdown reports & summaries (linked to batch_id)
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def get_conn():
         p.putconn(conn)
 
 
-# ── 建表 ──────────────────────────────────────────────────
+# ── Schema ──────────────────────────────────────────────────
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS batches (
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS reports (
 );
 CREATE INDEX IF NOT EXISTS idx_reports_batch ON reports(batch_id);
 
--- migrations: 兼容已有表
+-- migrations: backward-compatible with existing tables
 ALTER TABLE batches ALTER COLUMN batch_ts TYPE VARCHAR(20);
 
 DO $$ BEGIN
@@ -93,17 +93,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_batch_records_url ON batch_records(news_ur
 
 
 def ensure_schema():
-    """创建表（幂等）。"""
+    """Create tables (idempotent)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(_SCHEMA_SQL)
     logger.info("PostgreSQL schema ensured")
 
 
-# ── 写入 ──────────────────────────────────────────────────
+# ── Write ──────────────────────────────────────────────────
 
 def get_existing_urls(urls: list[str]) -> set[str]:
-    """查询数据库中已存在的新闻 URL 集合。"""
+    """Query the set of news URLs that already exist in the database."""
     if not urls:
         return set()
     with get_conn() as conn:
@@ -116,7 +116,7 @@ def get_existing_urls(urls: list[str]) -> set[str]:
 
 
 def insert_batch(batch_ts: str, records: list[dict]) -> int:
-    """插入一个批次及其所有记录（跳过 URL 已存在的），返回 batch_id。"""
+    """Insert a batch and all its records (skip URLs that already exist), return batch_id."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -138,7 +138,7 @@ def insert_batch(batch_ts: str, records: list[dict]) -> int:
                 )
                 inserted += cur.rowcount
 
-            # 更新实际插入数
+            # Update actual insert count
             cur.execute(
                 "UPDATE batches SET record_count = %s WHERE batch_id = %s",
                 (inserted, batch_id),
@@ -149,7 +149,7 @@ def insert_batch(batch_ts: str, records: list[dict]) -> int:
 
 
 def insert_reports(batch_id: int, reports_data: list[dict]):
-    """插入报告摘要。"""
+    """Insert report summaries."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             for r in reports_data:
@@ -173,10 +173,10 @@ def insert_reports(batch_id: int, reports_data: list[dict]):
     logger.info("inserted %d reports for batch_id=%d", len(reports_data), batch_id)
 
 
-# ── 查询（供 Web Server 使用） ────────────────────────────
+# ── Queries (used by Web Server) ────────────────────────────
 
 def list_batches() -> list[dict]:
-    """列出所有批次（按时间倒序）。"""
+    """List all batches (reverse chronological)."""
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
@@ -188,7 +188,7 @@ def list_batches() -> list[dict]:
 
 
 def get_batch_records(batch_id: int) -> list[dict]:
-    """获取指定批次的所有记录。"""
+    """Get all records for a given batch."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -196,7 +196,7 @@ def get_batch_records(batch_id: int) -> list[dict]:
                 (batch_id,),
             )
             records = [row[0] for row in cur.fetchall()]
-    # 注入 batch_id 到 topic 中，使 topic_id 跨批次唯一
+    # Inject batch_id into topic to make topic_id unique across batches
     for rec in records:
         topic = rec.get("topic")
         if topic and "batch_id" not in topic:
@@ -205,7 +205,7 @@ def get_batch_records(batch_id: int) -> list[dict]:
 
 
 def get_latest_batch_records() -> list[dict]:
-    """获取最新批次的所有记录。"""
+    """Get all records from the latest batch."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT batch_id FROM batches ORDER BY batch_ts DESC LIMIT 1")
@@ -216,7 +216,7 @@ def get_latest_batch_records() -> list[dict]:
 
 
 def get_batch_id_by_ts(batch_ts: str) -> int | None:
-    """根据时间戳查找 batch_id。"""
+    """Find batch_id by timestamp."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT batch_id FROM batches WHERE batch_ts = %s", (batch_ts,))
@@ -231,10 +231,10 @@ def get_records_since(
     score_lo: float = 0,
     score_hi: float = 100,
 ) -> dict:
-    """获取最近 N 小时内的记录（按 news_url 去重，保留最新），按主题分页。
+    """Get records from the last N hours (deduplicated by news_url, keeping latest), paginated by topic.
 
-    分页基于筛选（score_lo/score_hi）后的主题；
-    全局统计（total_items / above75 / score_bins / levels）始终基于全量数据。
+    Pagination is based on topics after filtering (score_lo/score_hi);
+    global stats (total_items / above75 / score_bins / levels) are always based on all data.
 
     Returns:
         {"items": [...], "page": int, "total_pages": int, ...}
@@ -260,11 +260,11 @@ def get_records_since(
                     topic["batch_id"] = bid
                 all_records.append(payload)
 
-    # ── 全局统计（不受筛选 & 分页影响） ──────────────────
+    # ── Global stats (unaffected by filters & pagination) ──────────────────
     total_items = len(all_records)
     above75 = sum(1 for r in all_records if (r.get("report") or {}).get("final_score", 0) >= 75)
     score_bins = [0] * 100
-    levels: dict[str, int] = {"高": 0, "中": 0, "低": 0}
+    levels: dict[str, int] = {"High": 0, "Medium": 0, "Low": 0}
     for r in all_records:
         report = r.get("report") or {}
         s = report.get("final_score", 0)
@@ -274,13 +274,13 @@ def get_records_since(
         if level in levels:
             levels[level] += 1
 
-    # ── 按分数筛选 ───────────────────────────────────────
+    # ── Filter by score ───────────────────────────────────────
     filtered = [
         r for r in all_records
         if score_lo <= (r.get("report") or {}).get("final_score", 0) <= score_hi
     ]
 
-    # 按主题分组
+    # Group by topic
     groups: dict[str, list[dict]] = {}
     for rec in filtered:
         topic = rec.get("topic") or {}
@@ -289,7 +289,7 @@ def get_records_since(
         key = f"{bid}:{tid}"
         groups.setdefault(key, []).append(rec)
 
-    # 按主题内最高分降序排列
+    # Sort by highest score within each topic (descending)
     sorted_keys = sorted(
         groups.keys(),
         key=lambda k: max((r.get("report", {}).get("final_score", 0) for r in groups[k]), default=0),
@@ -319,10 +319,10 @@ def get_records_since(
     }
 
 
-# ── 未翻译标签重试 ─────────────────────────────────────
+# ── Retry untranslated labels ─────────────────────────────────────
 
 def get_untranslated_topic_labels(limit: int = 100) -> list[tuple[int, dict]]:
-    """查询带 [EN]/[ZH] 前缀的未翻译主题标签。
+    """Query untranslated topic labels with [EN]/[ZH] prefix.
 
     Returns:
         [(record_id, {"zh": "...", "en": "..."}), ...]
@@ -341,13 +341,13 @@ def get_untranslated_topic_labels(limit: int = 100) -> list[tuple[int, dict]]:
 
 
 def update_topic_labels(updates: list[tuple[int, dict]]) -> int:
-    """批量更新 batch_records 中的主题标签。
+    """Batch update topic labels in batch_records.
 
     Args:
         updates: [(record_id, {"zh": "...", "en": "..."}), ...]
 
     Returns:
-        实际更新的行数
+        Number of rows actually updated
     """
     if not updates:
         return 0

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""OpenNews Web Server — 轻量 HTTP 服务器。
+"""OpenNews Web Server — lightweight HTTP server.
 
-同时提供：
-  1. web/ 目录下的前端静态文件
-  2. /api/batches        — 列出所有批次（按时间倒序）
-  3. /api/batches/latest — 读取最新批次的全部记录
-  4. /api/batches/<id>   — 读取指定批次的全部记录
+Serves:
+  1. Frontend static files from web/ directory
+  2. /api/batches        — list all batches (reverse chronological)
+  3. /api/batches/latest — read all records from the latest batch
+  4. /api/batches/<id>   — read all records for a specific batch
 
-启动方式：
+Usage:
   python web/server.py [--port 8080]
 """
 from __future__ import annotations
@@ -25,25 +25,25 @@ logger = logging.getLogger("opennews.web")
 
 WEB_DIR = Path(__file__).resolve().parent / "dist"
 
-# 将项目 src 加入 sys.path，以便导入 opennews 包
+# Add project src to sys.path to enable importing the opennews package
 _SRC = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 
 def _db():
-    """延迟导入 db 模块（首次调用时初始化连接池）。"""
+    """Lazy-import db module (connection pool initialized on first call)."""
     from opennews import db
     return db
 
 
 class OpenNewsHandler(SimpleHTTPRequestHandler):
-    """扩展静态文件服务器，增加 /api/* 路由。"""
+    """Extended static file server with /api/* routes."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(WEB_DIR), **kwargs)
 
-    # ── 路由分发 ──────────────────────────────────────────
+    # ── Route dispatch ──────────────────────────────────────────
     def do_GET(self):
         if self.path == "/api/batches":
             self._handle_list()
@@ -105,7 +105,7 @@ class OpenNewsHandler(SimpleHTTPRequestHandler):
             self._json_error(str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def _handle_records(self):
-        """GET /api/records?hours=N&page=P&score_lo=X&score_hi=Y — 获取最近 N 小时内的记录（按主题分页）。"""
+        """GET /api/records?hours=N&page=P&score_lo=X&score_hi=Y — get records from last N hours (paginated by topic)."""
         from urllib.parse import parse_qs, urlparse
         qs = parse_qs(urlparse(self.path).query)
         try:
@@ -132,7 +132,7 @@ class OpenNewsHandler(SimpleHTTPRequestHandler):
             logger.exception("get records since %s hours failed", hours)
             self._json_error(str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    # ── 响应工具 ──────────────────────────────────────────
+    # ── Response helpers ──────────────────────────────────────────
     def _json_response(self, obj, status=HTTPStatus.OK):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -151,12 +151,12 @@ class OpenNewsHandler(SimpleHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(description="OpenNews Web Server")
-    parser.add_argument("--port", type=int, default=8080, help="监听端口 (默认 8080)")
+    parser.add_argument("--port", type=int, default=8080, help="listen port (default 8080)")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
-    # 预检 PG 连接
+    # Pre-check PG connection
     try:
         db = _db()
         db.ensure_schema()

@@ -6,7 +6,7 @@ Real-time financial news knowledge graph & impact assessment system
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![中文](https://img.shields.io/badge/lang-中文-red.svg)](README.zh.md)
+[![Chinese](https://img.shields.io/badge/lang-中文-red.svg)](README.zh.md)
 
 </div>
 
@@ -241,7 +241,7 @@ Query via the web API or directly:
 -- Recent high-impact news
 SELECT payload->>'news'->>'title', payload->'report'->>'final_score'
 FROM batch_records br JOIN batches b ON br.batch_id = b.batch_id
-WHERE (payload->'report'->>'impact_level') = '高'
+WHERE (payload->'report'->>'impact_level') = 'High'
 ORDER BY b.created_at DESC;
 ```
 
@@ -260,7 +260,7 @@ Access via Neo4j Browser (requires local development setup with port `7474` expo
 
 ```cypher
 -- High-impact news
-MATCH (n:News) WHERE n.impact_level = '高'
+MATCH (n:News) WHERE n.impact_level = 'High'
 RETURN n.title, n.final_impact_score ORDER BY n.final_impact_score DESC
 
 -- Topic trends

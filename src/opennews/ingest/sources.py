@@ -1,4 +1,4 @@
-"""OpenNews 新闻源配置加载 — 启动时自动检测并创建默认配置。"""
+"""OpenNews news source config loader — auto-detects and creates default config on startup."""
 from __future__ import annotations
 
 import logging
@@ -13,12 +13,12 @@ _DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "sources
 
 _DEFAULT_CONTENT = """\
 # ═══════════════════════════════════════════════════════════
-#  OpenNews — 新闻源配置
-#  程序启动时自动检测，不存在则创建此默认文件
+#  OpenNews — News Source Configuration
+#  Auto-detected on startup; created with defaults if missing
 # ═══════════════════════════════════════════════════════════
 
-# 当前仅支持 newsnow 类型数据源
-# 每个 url 对应一个 NewsNow 兼容 API 端点，sources 为该端点下的频道列表
+# Currently only supports newsnow-type data sources
+# Each url maps to a NewsNow-compatible API endpoint; sources are the channels under that endpoint
 
 newsnow:
   - url: https://newsnow.busiyi.world/api/s/entire
@@ -29,22 +29,22 @@ newsnow:
 
 @dataclass(slots=True)
 class NewsNowEndpoint:
-    """单个 NewsNow API 端点配置。"""
+    """Configuration for a single NewsNow API endpoint."""
     url: str
     sources: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
 class SourcesConfig:
-    """新闻源总配置。"""
+    """Top-level news source configuration."""
     newsnow: list[NewsNowEndpoint] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> "SourcesConfig":
-        """从 YAML 加载配置，文件不存在时自动创建默认配置。"""
+        """Load config from YAML; auto-creates default config if file doesn't exist."""
         if path:
             cfg_path = Path(path)
-            # 相对路径基于项目根目录解析
+            # Resolve relative paths from project root
             if not cfg_path.is_absolute():
                 cfg_path = _DEFAULT_CONFIG_PATH.parent.parent / cfg_path
         else:

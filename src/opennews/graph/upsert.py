@@ -40,7 +40,7 @@ def build_graph_payload(
     time_decay = float(np.exp(-delta_hours / 24.0))
     impacts = []
     for a, b in combinations(entity_dicts, 2):
-        # 影响权重 = 语义自相似(=1.0) * 时间衰减（Step1 基线）
+        # Impact weight = semantic self-similarity (=1.0) * time decay (Step 1 baseline)
         w = max(0.05, min(1.0, 1.0 * time_decay))
         impacts.append({"src": a["entity_id"], "dst": b["entity_id"], "weight": w})
         impacts.append({"src": b["entity_id"], "dst": a["entity_id"], "weight": w})

@@ -1,10 +1,10 @@
-"""Memory Agent — 同主题新闻时序聚合。
+"""Memory Agent — same-topic news time-series aggregation.
 
-论文依据：arXiv 2602.00086 — 每日 sentiment 聚合。
-对同一主题的新闻列表进行时序聚合：
-  - 每日 sentiment sum / min / max / majority
-  - 计算累积影响趋势（滑动窗口均值 + 方向）
-  - 更新 GraphRAG 子图
+Based on: arXiv 2602.00086 — daily sentiment aggregation.
+Performs time-series aggregation on news items of the same topic:
+  - Daily sentiment sum / min / max / majority
+  - Computes cumulative impact trend (sliding window average + direction)
+  - Updates GraphRAG subgraph
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class DailySentimentAgg:
-    """单日某 topic 的聚合统计。"""
+    """Aggregated statistics for a single day of a topic."""
     date: str                    # YYYY-MM-DD
     topic_id: int
     count: int
@@ -28,43 +28,43 @@ class DailySentimentAgg:
     impact_min: float
     impact_max: float
     impact_avg: float
-    majority_category: str       # 当日出现最多的类别
+    majority_category: str       # Most frequent category of the day
     category_dist: dict[str, int]
 
 
 @dataclass(slots=True)
 class TopicTrend:
-    """某 topic 的累积影响趋势。"""
+    """Cumulative impact trend for a topic."""
     topic_id: int
     window_days: int
     total_news_count: int
     daily_aggs: list[DailySentimentAgg]
     trend_direction: str         # "rising" / "falling" / "stable"
-    avg_impact: float            # 窗口内平均影响分
-    latest_impact: float         # 最近一天平均影响分
+    avg_impact: float            # Average impact score within window
+    latest_impact: float         # Latest day average impact score
 
 
 class MemoryAgent:
-    """时序聚合 Agent。
+    """Time-series aggregation Agent.
 
-    Prompt 模板（内化为算法逻辑）：
-    ─────────────────────────────────
-    你是 Memory Agent。对同一主题的新闻列表进行时序聚合：
-    计算每日 sentiment sum/min/max/majority（参考 arXiv 2602.00086）
-    更新 GraphRAG 子图，注入"累积影响趋势"。
-    ─────────────────────────────────
+    Prompt template (internalized as algorithm logic):
+    -----------------------------------------
+    You are a Memory Agent. Perform time-series aggregation on same-topic news:
+    Compute daily sentiment sum/min/max/majority (ref: arXiv 2602.00086)
+    Update GraphRAG subgraph, injecting "cumulative impact trend".
+    -----------------------------------------
     """
 
     def __init__(self, memory_store: RedisMemoryStore):
         self.store = memory_store
 
     def ingest(self, records: list[MemoryRecord]) -> None:
-        """将当前批次的新闻写入时序记忆。"""
+        """Write current batch news into time-series memory."""
         self.store.add_batch(records)
         logger.info("memory agent ingested %d records", len(records))
 
     def aggregate_topic(self, topic_id: int, window_days: int = 30) -> TopicTrend:
-        """对某 topic 做时序聚合，返回趋势。"""
+        """Perform time-series aggregation for a topic, return trend."""
         records = self.store.query_topic(topic_id, days=window_days)
         if not records:
             return TopicTrend(
@@ -77,7 +77,7 @@ class MemoryAgent:
                 latest_impact=0.0,
             )
 
-        # 按日期分组
+        # Group by date
         by_date: dict[str, list[MemoryRecord]] = defaultdict(list)
         for r in records:
             day = r.published_at[:10]  # YYYY-MM-DD
@@ -105,10 +105,10 @@ class MemoryAgent:
                 category_dist=dict(cat_dist),
             ))
 
-        # 计算趋势方向
+        # Compute trend direction
         all_scores = [r.impact_score for r in records]
         avg_impact = round(sum(all_scores) / len(all_scores), 4)
-        latest_day_scores = [a.impact_avg for a in daily_aggs[-3:]]  # 最近 3 天
+        latest_day_scores = [a.impact_avg for a in daily_aggs[-3:]]  # Last 3 days
         earlier_scores = [a.impact_avg for a in daily_aggs[:-3]] if len(daily_aggs) > 3 else []
 
         if earlier_scores and latest_day_scores:
@@ -136,9 +136,9 @@ class MemoryAgent:
         )
 
     def aggregate_batch_topics(self, topic_ids: set[int], window_days: int = 30) -> dict[int, TopicTrend]:
-        """对一批 topic 做聚合。"""
+        """Aggregate a batch of topics."""
         return {
             tid: self.aggregate_topic(tid, window_days)
             for tid in topic_ids
-            if tid != -1  # 跳过 outlier
+            if tid != -1  # Skip outliers
         }

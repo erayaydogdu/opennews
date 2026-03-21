@@ -25,10 +25,10 @@ def job() -> None:
 
 
 def start_scheduler() -> None:
-    # 启动时确保配置文件存在（不存在则自动创建默认）
+    # Ensure config file exists on startup (auto-creates default if missing)
     SourcesConfig.load(settings.sources_config_path)
 
-    # 启动时立即建表，确保 PG schema 就绪（不依赖 pipeline 是否有数据）
+    # Create tables immediately on startup to ensure PG schema is ready (independent of pipeline data)
     try:
         ensure_pg_schema()
     except Exception:
@@ -37,5 +37,5 @@ def start_scheduler() -> None:
     scheduler = BlockingScheduler()
     scheduler.add_job(job, "interval", minutes=settings.poll_interval_minutes)
     logger.info("scheduler started, interval=%s min", settings.poll_interval_minutes)
-    job()  # 启动时先跑一轮
+    job()  # Run one round immediately on startup
     scheduler.start()

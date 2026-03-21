@@ -1,16 +1,16 @@
-"""Feature Agent — 7 维新闻价值特征提取 + 影响分计算。
+"""Feature Agent — 7-dimensional news value feature extraction + impact score calculation.
 
-论文依据：LLM-Assisted News Discovery 新闻价值编码。
-7 维特征：
-  1. market_impact    — 市场影响程度
-  2. price_signal     — 价格信号强度
-  3. regulatory_risk  — 监管风险
-  4. timeliness       — 时效性
-  5. impact           — 事件影响力
-  6. controversy      — 争议性
-  7. generalizability — 可推广性（加权 ×2）
+Based on: LLM-Assisted News Discovery value encoding.
+7 dimensions:
+  1. market_impact    — Market impact degree
+  2. price_signal     — Price signal strength
+  3. regulatory_risk  — Regulatory risk
+  4. timeliness       — Timeliness
+  5. impact           — Event impact
+  6. controversy      — Controversy
+  7. generalizability — Generalizability (weight x2)
 
-每维 1-5 分，impact_score = 加权平均（generalizability 权重 ×2）。
+Each dimension scored 1-5, impact_score = weighted average (generalizability weight x2).
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from transformers import pipeline
 
 logger = logging.getLogger(__name__)
 
-# ── 特征维度定义 ──────────────────────────────────────────────
+# ── Feature dimension definitions ──────────────────────────────────────────────
 FEATURE_DIMS = [
     "market_impact",
     "price_signal",
@@ -33,7 +33,7 @@ FEATURE_DIMS = [
     "generalizability",
 ]
 
-# 加权系数（generalizability ×2，其余 ×1）
+# Weight coefficients (generalizability x2, others x1)
 FEATURE_WEIGHTS: dict[str, float] = {
     "market_impact": 1.0,
     "price_signal": 1.0,
@@ -47,7 +47,7 @@ FEATURE_WEIGHTS: dict[str, float] = {
 
 @dataclass(slots=True)
 class FeatureVector:
-    """7 维特征 + 综合影响分。"""
+    """7-dimensional features + composite impact score."""
     market_impact: float = 1.0
     price_signal: float = 1.0
     regulatory_risk: float = 1.0
@@ -55,7 +55,7 @@ class FeatureVector:
     impact: float = 1.0
     controversy: float = 1.0
     generalizability: float = 1.0
-    impact_score: float = 1.0  # 加权平均
+    impact_score: float = 1.0  # Weighted average
 
     def to_dict(self) -> dict[str, float]:
         return {
@@ -71,15 +71,15 @@ class FeatureVector:
 
 
 def _compute_impact_score(features: dict[str, float]) -> float:
-    """加权平均，generalizability 权重 ×2。"""
+    """Weighted average, generalizability weight x2."""
     total_w = sum(FEATURE_WEIGHTS.values())
     weighted = sum(features.get(k, 1.0) * w for k, w in FEATURE_WEIGHTS.items())
     return round(weighted / total_w, 2)
 
 
-# ── NLI 代理评分 ──────────────────────────────────────────────
-# 每个维度用一组 NLI 假设来探测强度，
-# 将 entailment 概率映射到 1-5 分。
+# ── NLI proxy scoring ──────────────────────────────────────────────
+# Each dimension uses NLI hypotheses to probe intensity,
+# mapping entailment probability to a 1-5 score.
 
 _DIM_HYPOTHESES: dict[str, str] = {
     "market_impact": "This news will significantly move financial markets.",
@@ -93,23 +93,24 @@ _DIM_HYPOTHESES: dict[str, str] = {
 
 
 def _entailment_to_score(prob: float) -> float:
-    """将 entailment 概率 [0,1] 线性映射到 [1,5]。"""
+    """Linearly map entailment probability [0,1] to [1,5]."""
     return round(1.0 + 4.0 * max(0.0, min(1.0, prob)), 2)
 
 
 class FeatureAgent:
-    """基于 NLI 零样本推理的 7 维特征提取 Agent。
+    """NLI zero-shot inference based 7-dimensional feature extraction Agent.
 
-    Prompt 模板（内化为 NLI 假设）：
-    ─────────────────────────────────
-    你是金融新闻 Feature Agent。
-    对以下新闻，按 7 个维度评分（1-5）：
-    Timeliness / Impact / Controversy / Generalizability（×2）
+    Prompt template (internalized as NLI hypotheses):
+    -----------------------------------------
+    You are a financial news Feature Agent.
+    For the following news, score on 7 dimensions (1-5):
+    Timeliness / Impact / Controversy / Generalizability (x2)
     Market Impact / Price Signal / Regulatory Risk
-    输出 JSON：{"impact_score": 4.2, "features": {...}}
-    ─────────────────────────────────
-    实际实现：用 NLI 模型对每个维度假设做 entailment 推理，
-    将概率映射为 1-5 分，避免依赖外部 LLM API。
+    Output JSON: {"impact_score": 4.2, "features": {...}}
+    -----------------------------------------
+    Actual implementation: uses NLI model to perform entailment inference
+    per dimension hypothesis, mapping probabilities to 1-5 scores,
+    avoiding dependency on external LLM APIs.
     """
 
     def __init__(self, model_name: str):
@@ -122,7 +123,7 @@ class FeatureAgent:
         )
 
     def extract_features(self, text: str) -> FeatureVector:
-        """对单条新闻提取 7 维特征（逐维度推理）。"""
+        """Extract 7-dimensional features for a single news item (per-dimension inference)."""
         features: dict[str, float] = {}
         for dim, hypothesis in _DIM_HYPOTHESES.items():
             result = self._nli(
@@ -147,10 +148,10 @@ class FeatureAgent:
         )
 
     def extract_features_batch(self, texts: list[str]) -> list[FeatureVector]:
-        """批量特征提取。
+        """Batch feature extraction.
 
-        对每条文本，一次性把 7 个假设作为 candidate_labels 送入 NLI，
-        用各假设的得分映射为 1-5 分。比逐维度调用快 7 倍。
+        For each text, all 7 hypotheses are sent as candidate_labels to NLI at once,
+        mapping each hypothesis score to 1-5. 7x faster than per-dimension calls.
         """
         if not texts:
             return []
@@ -162,7 +163,7 @@ class FeatureAgent:
             texts,
             candidate_labels=hypotheses,
             hypothesis_template="This text is about {}.",
-            multi_label=True,  # 多标签模式，每个假设独立评分
+            multi_label=True,  # Multi-label mode, each hypothesis scored independently
         )
         if isinstance(results, dict):
             results = [results]

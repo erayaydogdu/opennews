@@ -1,17 +1,17 @@
-"""ReportAgent — DK-CoT 多维度评分 + Markdown 报告生成。
+"""ReportAgent — DK-CoT multi-dimensional scoring + Markdown report generation.
 
-论文依据：
-  - DK-CoT（Domain-Knowledge Chain-of-Thought）多链推理
-  - LLM-Assisted News Discovery 评分体系
-  - FinSCRA 模糊逻辑融合
+Based on:
+  - DK-CoT (Domain-Knowledge Chain-of-Thought) multi-chain reasoning
+  - LLM-Assisted News Discovery scoring system
+  - FinSCRA fuzzy logic fusion
 
-四维评分（0-100）：
-  股价相关性 (40%) — 基于 price_signal + market_impact 特征
-  市场情绪   (20%) — 基于分类置信度 + controversy 特征
-  政策风险   (20%) — 基于 regulatory_risk 特征 + 分类结果
-  传播广度   (20%) — 基于实体数量 + 跨源覆盖 + 社区数
+Four-dimensional scoring (0-100):
+  Stock Relevance  (40%) — based on price_signal + market_impact features
+  Market Sentiment (20%) — based on classification confidence + controversy features
+  Policy Risk      (20%) — based on regulatory_risk features + classification results
+  Spread Breadth   (20%) — based on entity count + cross-source coverage + community count
 
-最终得分持久化到 Neo4j News 节点，支持按得分筛选。
+Final score persisted to Neo4j News node, supports score-based filtering.
 """
 from __future__ import annotations
 
@@ -23,15 +23,15 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-# ── 数据结构 ──────────────────────────────────────────────────
+# ── Data structures ──────────────────────────────────────────────────
 
 @dataclass(slots=True)
 class DKCoTScores:
-    """DK-CoT 四维评分明细。"""
-    stock_relevance: float     # 股价相关性 0-100
-    market_sentiment: float    # 市场情绪 0-100
-    policy_risk: float         # 政策风险 0-100
-    spread_breadth: float      # 传播广度 0-100
+    """DK-CoT four-dimensional score breakdown."""
+    stock_relevance: float     # Stock relevance 0-100
+    market_sentiment: float    # Market sentiment 0-100
+    policy_risk: float         # Policy risk 0-100
+    spread_breadth: float      # Spread breadth 0-100
 
     def to_dict(self) -> dict[str, float]:
         return {
@@ -44,14 +44,14 @@ class DKCoTScores:
 
 @dataclass(slots=True)
 class NewsReport:
-    """单条新闻的影响评估报告。"""
+    """Impact assessment report for a single news item."""
     news_id: str
-    final_score: float         # 最终影响得分 0-100
-    impact_level: str          # "高" / "中" / "低"
+    final_score: float         # Final impact score 0-100
+    impact_level: str          # "High" / "Medium" / "Low"
     dk_cot_scores: DKCoTScores
-    reasoning: str             # DK-CoT 推理链文本
-    markdown: str              # 完整 Markdown 报告
-    viz_suggestions: list[str] # 可视化建议
+    reasoning: str             # DK-CoT reasoning chain text
+    markdown: str              # Full Markdown report
+    viz_suggestions: list[str] # Visualization suggestions
 
     def to_dict(self) -> dict:
         return {
@@ -65,28 +65,28 @@ class NewsReport:
         }
 
 
-# ── 评分引擎 ──────────────────────────────────────────────────
+# ── Scoring engine ──────────────────────────────────────────────────
 
 def _clamp(v: float, lo: float = 0.0, hi: float = 100.0) -> float:
     return max(lo, min(hi, v))
 
 
 def _feature_to_100(val: float, scale_max: float = 5.0) -> float:
-    """将 1-5 分特征映射到 0-100。"""
+    """Map 1-5 feature score to 0-100."""
     return _clamp((val - 1.0) / (scale_max - 1.0) * 100.0)
 
 
 class ReportAgent:
-    """金融影响 ReportAgent。
+    """Financial impact ReportAgent.
 
-    Prompt 模板（内化为算法逻辑）：
-    ─────────────────────────────────
-    你是金融影响 ReportAgent。
-    输入：同类新闻 Graph 子图 + 时序记忆
-    用 DK-CoT（领域知识链式思考）计算最终影响得分（0-100）：
-    维度：股价相关性(40%)、市场情绪(20%)、政策风险(20%)、传播广度(20%)
-    输出 Markdown 报告 + 可视化建议（趋势图）。
-    ─────────────────────────────────
+    Prompt template (internalized as algorithm logic):
+    -----------------------------------------
+    You are a financial impact ReportAgent.
+    Input: same-topic news Graph subgraph + time-series memory
+    Use DK-CoT (Domain-Knowledge Chain-of-Thought) to compute final impact score (0-100):
+    Dimensions: Stock Relevance (40%), Market Sentiment (20%), Policy Risk (20%), Spread Breadth (20%)
+    Output Markdown report + visualization suggestions (trend charts).
+    -----------------------------------------
     """
 
     def __init__(
@@ -107,17 +107,17 @@ class ReportAgent:
             logger.warning("DK-CoT weights sum to %.2f, normalizing", total)
             self.weights = {k: v / total for k, v in self.weights.items()}
 
-    # ── DK-CoT 链式推理 ──────────────────────────────────────
+    # ── DK-CoT chain reasoning ──────────────────────────────────────
 
     def _score_stock_relevance(
         self, features: dict, classification: dict, trend: dict | None
     ) -> tuple[float, str]:
-        """维度1：股价相关性 — price_signal + market_impact + 趋势方向。"""
+        """Dimension 1: Stock Relevance — price_signal + market_impact + trend direction."""
         price_sig = features.get("price_signal", 1.0)
         mkt_impact = features.get("market_impact", 1.0)
         base = (_feature_to_100(price_sig) * 0.6 + _feature_to_100(mkt_impact) * 0.4)
 
-        # 趋势加成：rising +10, falling -5
+        # Trend bonus: rising +10, falling -5
         if trend:
             direction = trend.get("trend_direction", "stable")
             if direction == "rising":
@@ -126,7 +126,7 @@ class ReportAgent:
                 base = _clamp(base - 5)
 
         reasoning = (
-            f"[股价相关性] price_signal={price_sig:.1f}→{_feature_to_100(price_sig):.0f}, "
+            f"[Stock Relevance] price_signal={price_sig:.1f}→{_feature_to_100(price_sig):.0f}, "
             f"market_impact={mkt_impact:.1f}→{_feature_to_100(mkt_impact):.0f}, "
             f"trend={'N/A' if not trend else trend.get('trend_direction', 'stable')}, "
             f"score={base:.1f}"
@@ -136,7 +136,7 @@ class ReportAgent:
     def _score_market_sentiment(
         self, features: dict, classification: dict
     ) -> tuple[float, str]:
-        """维度2：市场情绪 — controversy + 分类置信度 + impact 特征。"""
+        """Dimension 2: Market Sentiment — controversy + classification confidence + impact features."""
         controversy = features.get("controversy", 1.0)
         impact_feat = features.get("impact", 1.0)
         confidence = classification.get("confidence", 0.0)
@@ -148,7 +148,7 @@ class ReportAgent:
         )
 
         reasoning = (
-            f"[市场情绪] controversy={controversy:.1f}→{_feature_to_100(controversy):.0f}, "
+            f"[Market Sentiment] controversy={controversy:.1f}→{_feature_to_100(controversy):.0f}, "
             f"impact={impact_feat:.1f}→{_feature_to_100(impact_feat):.0f}, "
             f"clf_confidence={confidence:.2f}, score={base:.1f}"
         )
@@ -157,7 +157,7 @@ class ReportAgent:
     def _score_policy_risk(
         self, features: dict, classification: dict
     ) -> tuple[float, str]:
-        """维度3：政策风险 — regulatory_risk + 是否 policy_regulation 类别。"""
+        """Dimension 3: Policy Risk — regulatory_risk + whether classified as policy_regulation."""
         reg_risk = features.get("regulatory_risk", 1.0)
         base = _feature_to_100(reg_risk) * 0.7
 
@@ -166,12 +166,12 @@ class ReportAgent:
         policy_prob = cat_scores.get("policy_regulation", 0.0)
         base += policy_prob * 100 * 0.3
 
-        # 如果主类别就是 policy_regulation，额外加成
+        # Extra bonus if main category is policy_regulation
         if category == "policy_regulation":
             base = _clamp(base + 10)
 
         reasoning = (
-            f"[政策风险] regulatory_risk={reg_risk:.1f}→{_feature_to_100(reg_risk):.0f}, "
+            f"[Policy Risk] regulatory_risk={reg_risk:.1f}→{_feature_to_100(reg_risk):.0f}, "
             f"policy_prob={policy_prob:.2f}, category={category}, score={base:.1f}"
         )
         return round(base, 2), reasoning
@@ -179,32 +179,32 @@ class ReportAgent:
     def _score_spread_breadth(
         self, entities: list[dict], news_source: str, trend: dict | None
     ) -> tuple[float, str]:
-        """维度4：传播广度 — 实体数量 + 跨源覆盖 + 社区数。"""
+        """Dimension 4: Spread Breadth — entity count + cross-source coverage + community count."""
         entity_count = len(entities)
-        # 实体数映射：0→0, 5→50, 10+→100
+        # Entity count mapping: 0→0, 5→50, 10+→100
         entity_score = _clamp(entity_count * 10.0)
 
-        # 来源多样性（简单启发式）
-        source_score = 50.0  # 基线
+        # Source diversity (simple heuristic)
+        source_score = 50.0  # baseline
         if any(k in news_source for k in ("reuters", "caixin")):
             source_score = 70.0
         if any(k in news_source for k in ("weibo", "sina")):
             source_score = max(source_score, 60.0)
 
-        # 趋势中的新闻总数
+        # Total news count in trend
         total_count = (trend or {}).get("total_news_count", 0)
         count_score = _clamp(total_count * 5.0)
 
         base = entity_score * 0.4 + source_score * 0.3 + count_score * 0.3
 
         reasoning = (
-            f"[传播广度] entities={entity_count}→{entity_score:.0f}, "
+            f"[Spread Breadth] entities={entity_count}→{entity_score:.0f}, "
             f"source_score={source_score:.0f}, "
             f"topic_news_count={total_count}→{count_score:.0f}, score={base:.1f}"
         )
         return round(base, 2), reasoning
 
-    # ── 主评分入口 ────────────────────────────────────────────
+    # ── Main scoring entry ────────────────────────────────────────────
 
     def evaluate(
         self,
@@ -216,8 +216,8 @@ class ReportAgent:
         news_source: str,
         trend: dict | None = None,
     ) -> NewsReport:
-        """对单条新闻执行 DK-CoT 评分 + 生成报告。"""
-        # Chain-of-Thought: 逐维度推理
+        """Execute DK-CoT scoring + report generation for a single news item."""
+        # Chain-of-Thought: per-dimension reasoning
         s1, r1 = self._score_stock_relevance(features, classification, trend)
         s2, r2 = self._score_market_sentiment(features, classification)
         s3, r3 = self._score_policy_risk(features, classification)
@@ -230,7 +230,7 @@ class ReportAgent:
             spread_breadth=s4,
         )
 
-        # 加权融合（FinSCRA 模糊逻辑）
+        # Weighted fusion (FinSCRA fuzzy logic)
         final = (
             s1 * self.weights["stock_relevance"]
             + s2 * self.weights["market_sentiment"]
@@ -238,8 +238,8 @@ class ReportAgent:
             + s4 * self.weights["spread_breadth"]
         )
 
-        # 领域相关性惩罚：分类置信度低说明不属于任何金融类别，
-        # 对最终分数施加折扣，避免非金融新闻被高估
+        # Domain relevance penalty: low classification confidence means it doesn't belong to any financial category,
+        # apply discount to final score to avoid overestimating non-financial news
         clf_confidence = classification.get("confidence", 0.0)
         domain_penalty = 1.0
         if clf_confidence < 0.3:
@@ -251,23 +251,23 @@ class ReportAgent:
         if domain_penalty < 1.0:
             final *= domain_penalty
             penalty_reason = (
-                f"\n  [领域惩罚] clf_confidence={clf_confidence:.2f} < 阈值, "
+                f"\n  [Domain Penalty] clf_confidence={clf_confidence:.2f} < threshold, "
                 f"penalty={domain_penalty:.1f}"
             )
 
         final = round(_clamp(final), 2)
 
-        # 影响等级
+        # Impact level
         if final > 75:
-            level = "高"
+            level = "High"
         elif final > 40:
-            level = "中"
+            level = "Medium"
         else:
-            level = "低"
+            level = "Low"
 
-        reasoning = f"DK-CoT 推理链:\n  {r1}\n  {r2}\n  {r3}\n  {r4}{penalty_reason}\n  → 加权得分={final}, 等级={level}"
+        reasoning = f"DK-CoT Reasoning Chain:\n  {r1}\n  {r2}\n  {r3}\n  {r4}{penalty_reason}\n  → Weighted score={final}, Level={level}"
 
-        # 生成 Markdown 报告
+        # Generate Markdown report
         markdown = self._render_markdown(
             title=title,
             news_id=news_id,
@@ -279,7 +279,7 @@ class ReportAgent:
             trend=trend,
         )
 
-        # 可视化建议
+        # Visualization suggestions
         viz = self._suggest_visualizations(scores, trend)
 
         return NewsReport(
@@ -297,7 +297,7 @@ class ReportAgent:
         payloads: list[dict],
         trends: dict | None = None,
     ) -> list[NewsReport]:
-        """批量评估。payloads 中每项需包含 news/features/classification/entities。"""
+        """Batch evaluation. Each payload must contain news/features/classification/entities."""
         reports = []
         for p in payloads:
             news = p.get("news", {})
@@ -324,7 +324,7 @@ class ReportAgent:
             reports.append(report)
         return reports
 
-    # ── Markdown 渲染 ─────────────────────────────────────────
+    # ── Markdown rendering ─────────────────────────────────────────
 
     def _render_markdown(
         self,
@@ -342,47 +342,47 @@ class ReportAgent:
         category = classification.get("category", "unknown")
         confidence = classification.get("confidence", 0.0)
 
-        return f"""## 金融影响评估报告
+        return f"""## Financial Impact Assessment Report
 
-**新闻**: {title}
+**News**: {title}
 **ID**: `{news_id}`
-**分类**: {category} (置信度 {confidence:.1%})
-**影响等级**: **{level}** (得分 {final:.1f}/100)
+**Category**: {category} (confidence {confidence:.1%})
+**Impact Level**: **{level}** (score {final:.1f}/100)
 
-### DK-CoT 四维评分
+### DK-CoT Four-Dimensional Scoring
 
-| 维度 | 得分 | 权重 |
-|------|------|------|
-| 股价相关性 | {scores.stock_relevance:.1f} | {self.weights['stock_relevance']:.0%} |
-| 市场情绪 | {scores.market_sentiment:.1f} | {self.weights['market_sentiment']:.0%} |
-| 政策风险 | {scores.policy_risk:.1f} | {self.weights['policy_risk']:.0%} |
-| 传播广度 | {scores.spread_breadth:.1f} | {self.weights['spread_breadth']:.0%} |
-| **加权总分** | **{final:.1f}** | |
+| Dimension | Score | Weight |
+|-----------|-------|--------|
+| Stock Relevance | {scores.stock_relevance:.1f} | {self.weights['stock_relevance']:.0%} |
+| Market Sentiment | {scores.market_sentiment:.1f} | {self.weights['market_sentiment']:.0%} |
+| Policy Risk | {scores.policy_risk:.1f} | {self.weights['policy_risk']:.0%} |
+| Spread Breadth | {scores.spread_breadth:.1f} | {self.weights['spread_breadth']:.0%} |
+| **Weighted Total** | **{final:.1f}** | |
 
-### 推理过程
+### Reasoning Process
 
 ```
 {reasoning}
 ```
 
-### 趋势上下文
+### Trend Context
 
-- 趋势方向: {trend_dir}
-- 窗口平均影响: {trend_avg:.2f}
+- Trend direction: {trend_dir}
+- Window average impact: {trend_avg:.2f}
 """
 
-    # ── 可视化建议 ─────────────────────────────────────────────
+    # ── Visualization suggestions ─────────────────────────────────────────────
 
     def _suggest_visualizations(
         self, scores: DKCoTScores, trend: dict | None
     ) -> list[str]:
         suggestions = [
-            "雷达图: 四维评分对比 (stock_relevance / market_sentiment / policy_risk / spread_breadth)",
+            "Radar chart: four-dimensional score comparison (stock_relevance / market_sentiment / policy_risk / spread_breadth)",
         ]
         if trend and trend.get("total_news_count", 0) > 3:
             suggestions.append(
-                f"时序折线图: 主题影响趋势 (方向={trend.get('trend_direction', 'stable')}, "
-                f"窗口内 {trend.get('total_news_count', 0)} 条新闻)"
+                f"Time-series line chart: topic impact trend (direction={trend.get('trend_direction', 'stable')}, "
+                f"{trend.get('total_news_count', 0)} news items in window)"
             )
-        suggestions.append("柱状图: 同主题新闻影响得分分布")
+        suggestions.append("Bar chart: impact score distribution for same-topic news")
         return suggestions

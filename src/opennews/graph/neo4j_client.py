@@ -15,10 +15,10 @@ class GraphPayload:
     entities: list[dict]
     topic: dict
     impacts: list[dict]
-    # Step2: 分类 & 特征（可选）
+    # Step 2: Classification & features (optional)
     classification: dict | None = None
     features: dict | None = None
-    # Step4: 最终影响评分（可选）
+    # Step 4: Final impact score (optional)
     report: dict | None = None
 
 
@@ -80,12 +80,12 @@ class Neo4jGraphClient:
                         "topic_label_zh": topic["label"].get("zh", "") if isinstance(topic["label"], dict) else topic["label"],
                         "topic_label_en": topic["label"].get("en", "") if isinstance(topic["label"], dict) else topic["label"],
                         "topic_prob": topic["probability"],
-                        # Step2: 分类 & 特征
+                        # Step 2: Classification & features
                         "category": (payload.classification or {}).get("category", "unknown"),
                         "category_confidence": (payload.classification or {}).get("confidence", 0.0),
                         "impact_score": (payload.features or {}).get("impact_score", 0.0),
                         "features": json.dumps(payload.features) if payload.features else "{}",
-                        # Step4: 最终影响评分
+                        # Step 4: Final impact score
                         "final_impact_score": (payload.report or {}).get("final_score", 0.0),
                         "impact_level": (payload.report or {}).get("impact_level", ""),
                         "now": now,

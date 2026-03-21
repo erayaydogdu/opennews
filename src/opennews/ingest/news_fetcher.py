@@ -26,12 +26,12 @@ class NewsItem:
 
 
 def normalize_url(url: str) -> str:
-    """URL 标准化：去除尾部斜杠、query 中的跟踪参数、fragment 等。"""
+    """URL normalization: strip trailing slash, tracking params from query, fragment, etc."""
     from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
     url = url.strip()
     p = urlparse(url)
-    # 去除 fragment
-    # 去除常见跟踪参数
+    # Strip fragment
+    # Strip common tracking parameters
     drop_params = {"utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "spm", "from"}
     qs = {k: v for k, v in parse_qs(p.query).items() if k not in drop_params}
     cleaned = urlunparse((
@@ -60,7 +60,7 @@ def deduplicate_news(items: list[NewsItem]) -> list[NewsItem]:
     return result
 
 
-# ── NewsNow API 抓取 ──────────────────────────────────────────
+# ── NewsNow API fetching ──────────────────────────────────────────
 
 def fetch_newsnow(
     api_url: str,
@@ -69,10 +69,10 @@ def fetch_newsnow(
     since: datetime | None = None,
     timeout: int = 30,
 ) -> list[NewsItem]:
-    """从 NewsNow 格式接口批量抓取新闻。
+    """Fetch news in bulk from a NewsNow-format API.
 
-    API 请求：POST api_url  body: {"sources": [...]}
-    API 响应：[{id, status, items: [{id, title, url, extra: {date: ms_timestamp}}]}]
+    API request: POST api_url  body: {"sources": [...]}
+    API response: [{id, status, items: [{id, title, url, extra: {date: ms_timestamp}}]}]
     """
     items: list[NewsItem] = []
 
@@ -100,7 +100,7 @@ def fetch_newsnow(
             if not title or not url:
                 continue
 
-            # extra.date 是毫秒时间戳
+            # extra.date is a millisecond timestamp
             date_ms = (entry.get("extra") or {}).get("date")
             if date_ms:
                 published_at = datetime.fromtimestamp(date_ms / 1000, tz=timezone.utc)
@@ -113,7 +113,7 @@ def fetch_newsnow(
             items.append(NewsItem(
                 news_id=_make_news_id(url, published_at),
                 title=title,
-                content=title,  # NewsNow 接口不返回正文，用标题代替
+                content=title,  # NewsNow API doesn't return body text, use title instead
                 source=source_id,
                 url=url,
                 published_at=published_at,

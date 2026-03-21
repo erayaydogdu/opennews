@@ -8,7 +8,7 @@ from opennews.ingest.news_fetcher import NewsItem
 
 
 class RealtimeSeedInjector:
-    """从本地 JSONL 注入实时种子新闻，模拟 FinBloom 实时补丁流。"""
+    """Inject real-time seed news from local JSONL, simulating a FinBloom live patch stream."""
 
     def __init__(self, seed_file: str = "seeds/realtime_seeds.jsonl"):
         self.seed_file = Path(seed_file)

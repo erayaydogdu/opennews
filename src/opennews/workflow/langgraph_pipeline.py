@@ -46,13 +46,13 @@ class PipelineState(TypedDict, total=False):
     embeddings: list[list[float]]
     entities: list[list]
     topics: list
-    # Step2: 分类 & 特征
+    # Step 2: Classification & features
     classifications: list[ClassificationResult]
     features: list[FeatureVector]
     payloads: list[GraphPayload]
-    # Step3: 时序记忆 & 趋势
+    # Step 3: Time-series memory & trends
     topic_trends: dict[int, TopicTrend]
-    # Step4: 影响评估报告
+    # Step 4: Impact assessment reports
     reports: list[NewsReport]
     result: str
 
@@ -64,11 +64,11 @@ class PipelineRuntime:
     topic_model: OnlineTopicModel = field(
         default_factory=OnlineTopicModel
     )
-    # LLM 主题精炼 Agent
+    # LLM topic refinement agent
     topic_refine_agent: TopicRefineAgent = field(
         default_factory=lambda: TopicRefineAgent(LLMConfig.load(settings.llm_config_path))
     )
-    # Step2: Classifier Agent & Feature Agent（复用同一个 NLI 模型）
+    # Step 2: Classifier Agent & Feature Agent (share the same NLI model)
     classifier: ClassifierAgent = field(
         default_factory=lambda: ClassifierAgent(
             model_name=settings.classifier_model,
@@ -85,8 +85,8 @@ class PipelineRuntime:
             window_days=settings.memory_window_days,
         )
     )
-    memory_agent: MemoryAgent = field(default=None)  # 延迟初始化
-    graphrag_querier: GraphRAGQuerier = field(default=None)  # 延迟初始化
+    memory_agent: MemoryAgent = field(default=None)  # Lazy initialization
+    graphrag_querier: GraphRAGQuerier = field(default=None)  # Lazy initialization
     # Step4: ReportAgent
     report_agent: ReportAgent = field(
         default_factory=lambda: ReportAgent(
@@ -114,7 +114,7 @@ runtime: PipelineRuntime | None = None
 
 
 def _get_runtime() -> PipelineRuntime:
-    """延迟初始化 runtime，避免模块导入时加载重型模型。"""
+    """Lazy-initialize runtime to avoid loading heavy models at module import time."""
     global runtime
     if runtime is None:
         runtime = PipelineRuntime()
@@ -124,7 +124,7 @@ def _get_runtime() -> PipelineRuntime:
 
 
 def init_graph_schema() -> bool:
-    """延迟初始化图谱 schema，避免模块导入阶段因 Neo4j 未启动直接崩溃。"""
+    """Lazy-initialize graph schema to avoid crashing at module import if Neo4j is not running."""
     try:
         _get_runtime().graph_client.ensure_schema()
         return True
@@ -135,7 +135,7 @@ def init_graph_schema() -> bool:
 
 
 def retry_labels_node(state: PipelineState) -> PipelineState:
-    """重试之前本地化失败的主题标签（带 [EN]/[ZH] 前缀）。"""
+    """Retry previously failed topic label translations (with [EN]/[ZH] prefix)."""
     try:
         failed = get_untranslated_topic_labels(limit=100)
     except Exception:
@@ -166,7 +166,7 @@ def fetch_news_node(state: PipelineState) -> PipelineState:
     rt = _get_runtime()
     last_dt = rt.checkpoint.load_last_published_at()
 
-    # 从所有 newsnow 端点抓取
+    # Fetch from all newsnow endpoints
     news_batch: list[NewsItem] = []
     for endpoint in rt.sources_config.newsnow:
         items = fetch_newsnow(
@@ -183,7 +183,7 @@ def fetch_news_node(state: PipelineState) -> PipelineState:
     if last_dt:
         batch = [b for b in batch if b.published_at > last_dt]
 
-    # 排除数据库中已有分析结果的新闻（以 URL 为唯一标识）
+    # Exclude news already analyzed in the database (URL as unique identifier)
     if batch:
         from opennews.db import get_existing_urls
         try:
@@ -227,7 +227,7 @@ def topic_node(state: PipelineState) -> PipelineState:
 
 
 def refine_topics_node(state: PipelineState) -> PipelineState:
-    """LLM 主题精炼：对聚类候选组进行语义拆分。"""
+    """LLM topic refinement: semantic splitting of clustering candidate groups."""
     docs = state.get("docs", [])
     topics = state.get("topics", [])
     if not docs or not topics:
@@ -237,15 +237,15 @@ def refine_topics_node(state: PipelineState) -> PipelineState:
     labels = {a.topic_id: rt.topic_model.get_topic_label(a.topic_id) for a in topics}
     refined, refined_labels = rt.topic_refine_agent.refine_topics(docs, topics, labels)
 
-    # 回写 labels 到 topic_model 以便后续 get_topic_label 正常工作
+    # Write labels back to topic_model so subsequent get_topic_label calls work correctly
     rt.topic_model._labels.update(refined_labels)
 
     return {"topics": refined}
 
 
-# ── Step2: Classifier Agent 节点 ──────────────────────────────
+# ── Step 2: Classifier Agent node ──────────────────────────────
 def classify_node(state: PipelineState) -> PipelineState:
-    """零样本分类：金融/政策/公司事件等。"""
+    """Zero-shot classification: finance/policy/company events, etc."""
     docs = state.get("docs", [])
     if not docs:
         return {"classifications": []}
@@ -261,9 +261,9 @@ def classify_node(state: PipelineState) -> PipelineState:
     return {"classifications": classifications}
 
 
-# ── Step2: Feature Agent 节点 ─────────────────────────────────
+# ── Step 2: Feature Agent node ─────────────────────────────────
 def feature_node(state: PipelineState) -> PipelineState:
-    """7 维新闻价值特征提取 + 影响分。"""
+    """7-dimensional news value feature extraction + impact score."""
     docs = state.get("docs", [])
     if not docs:
         return {"features": []}
@@ -300,7 +300,7 @@ def build_payload_node(state: PipelineState) -> PipelineState:
             topic=topic,
             topic_label=label,
         )
-        # Step2: 注入分类 & 特征到 payload
+        # Step 2: Inject classification & features into payload
         clf_dict = None
         feat_dict = None
         if i < len(classifications):
@@ -327,7 +327,7 @@ def build_payload_node(state: PipelineState) -> PipelineState:
 
 
 def dump_output_node(state: PipelineState) -> PipelineState:
-    """每轮把解析结果（含 report）写入 PostgreSQL。"""
+    """Write parsed results (including report) to PostgreSQL each round."""
     payloads = state.get("payloads", [])
     reports = state.get("reports", [])
     if not payloads:
@@ -339,7 +339,7 @@ def dump_output_node(state: PipelineState) -> PipelineState:
     records = []
     for p in payloads:
         news = p.news.copy()
-        # embedding 只保留前 8 维，避免数据过大
+        # Keep only first 8 dims of embedding to avoid excessive data size
         emb = news.get("embedding", [])
         news["embedding_preview"] = emb[:8]
         news.pop("embedding", None)
@@ -359,7 +359,7 @@ def dump_output_node(state: PipelineState) -> PipelineState:
         batch_id = insert_batch(ts, records)
         logger.info("dumped %d records to PostgreSQL (batch_id=%d, ts=%s)", len(records), batch_id, ts)
 
-        # 写入 reports 表
+        # Write to reports table
         if reports:
             reports_data = [
                 {
@@ -399,9 +399,9 @@ def write_graph_node(state: PipelineState) -> PipelineState:
     return {"result": f"updated {len(payloads)} news into graph"}
 
 
-# ── Step3: Memory Agent 节点 ──────────────────────────────────
+# ── Step 3: Memory Agent node ──────────────────────────────────
 def memory_ingest_node(state: PipelineState) -> PipelineState:
-    """将当前批次写入时序记忆（Redis / fallback）。"""
+    """Write current batch to time-series memory (Redis / fallback)."""
     payloads = state.get("payloads", [])
     if not payloads:
         return {"topic_trends": {}}
@@ -422,7 +422,7 @@ def memory_ingest_node(state: PipelineState) -> PipelineState:
     except Exception:
         logger.exception("memory ingest failed")
 
-    # 聚合当前批次涉及的所有 topic
+    # Aggregate all topics involved in the current batch
     topic_ids = {r.topic_id for r in records}
     try:
         trends = _get_runtime().memory_agent.aggregate_batch_topics(
@@ -435,9 +435,9 @@ def memory_ingest_node(state: PipelineState) -> PipelineState:
     return {"topic_trends": trends}
 
 
-# ── Step3: 趋势写入 GraphRAG 节点 ─────────────────────────────
+# ── Step 3: Write trends to GraphRAG node ─────────────────────────────
 def update_trends_node(state: PipelineState) -> PipelineState:
-    """将累积影响趋势写入 Neo4j Topic 节点。"""
+    """Write cumulative impact trends to Neo4j Topic nodes."""
     trends = state.get("topic_trends", {})
     if not trends:
         return {}
@@ -460,9 +460,9 @@ def update_trends_node(state: PipelineState) -> PipelineState:
     return {}
 
 
-# ── Step4: ReportAgent 节点 ───────────────────────────────────
+# ── Step 4: ReportAgent node ───────────────────────────────────
 def report_node(state: PipelineState) -> PipelineState:
-    """DK-CoT 多维度评分 + Markdown 报告生成。可通过 REPORT_ENABLED 开关。"""
+    """DK-CoT multi-dimensional scoring + Markdown report generation. Toggleable via REPORT_ENABLED."""
     if not settings.report_enabled:
         logger.info("report generation disabled, skipping")
         return {"reports": []}
@@ -472,7 +472,7 @@ def report_node(state: PipelineState) -> PipelineState:
     if not payloads:
         return {"reports": []}
 
-    # 构建 ReportAgent 所需的输入格式
+    # Build input format required by ReportAgent
     eval_items = []
     for p in payloads:
         eval_items.append({
@@ -489,7 +489,7 @@ def report_node(state: PipelineState) -> PipelineState:
         logger.exception("report_node failed")
         reports = []
 
-    # 将 report 数据回写到 payloads（用于后续持久化）
+    # Write report data back to payloads (for subsequent persistence)
     for i, report in enumerate(reports):
         if i < len(payloads):
             payloads[i] = GraphPayload(
@@ -507,22 +507,22 @@ def report_node(state: PipelineState) -> PipelineState:
 
 def build_pipeline():
     g = StateGraph(PipelineState)
-    # 重试之前失败的主题标签翻译
+    # Retry previously failed topic label translations
     g.add_node("retry_labels", retry_labels_node)
     g.add_node("fetch_news", fetch_news_node)
     g.add_node("embed", embed_node)
     g.add_node("extract_entities", entity_node)
     g.add_node("topics", topic_node)
     g.add_node("refine_topics", refine_topics_node)
-    # Step2: Agent 节点
+    # Step 2: Agent nodes
     g.add_node("classify", classify_node)
     g.add_node("extract_features", feature_node)
     g.add_node("build_payload", build_payload_node)
     g.add_node("dump_output", dump_output_node)
-    # Step3: 时序记忆 & 趋势
+    # Step 3: Time-series memory & trends
     g.add_node("memory_ingest", memory_ingest_node)
     g.add_node("update_trends", update_trends_node)
-    # Step4: 报告生成 + 图谱写入
+    # Step 4: Report generation + graph write
     g.add_node("report", report_node)
     g.add_node("write_graph", write_graph_node)
 
@@ -530,7 +530,7 @@ def build_pipeline():
     g.add_edge("retry_labels", "fetch_news")
     g.add_edge("fetch_news", "embed")
     g.add_edge("embed", "extract_entities")
-    # 并行分支：entities → topics / classify / features
+    # Parallel branches: entities → topics / classify / features
     g.add_edge("extract_entities", "topics")
     g.add_edge("extract_entities", "classify")
     g.add_edge("extract_entities", "extract_features")
@@ -540,9 +540,9 @@ def build_pipeline():
     g.add_edge("classify", "build_payload")
     g.add_edge("extract_features", "build_payload")
     g.add_edge("build_payload", "memory_ingest")
-    # Step3: 时序记忆聚合
+    # Step 3: Time-series memory aggregation
     g.add_edge("memory_ingest", "update_trends")
-    # Step4: report 需要 trends → dump_output 在 report 之后写入 PG（含完整 report）
+    # Step 4: report needs trends → dump_output writes to PG after report (with full report)
     g.add_edge("update_trends", "report")
     g.add_edge("report", "dump_output")
     g.add_edge("dump_output", "write_graph")

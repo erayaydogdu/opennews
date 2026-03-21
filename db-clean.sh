@@ -22,38 +22,38 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 echo ""
 echo -e "${YELLOW}════════════════════════════════════════════════${NC}"
-echo -e "${YELLOW}  OpenNews 数据清理${NC}"
-echo -e "${YELLOW}  将清除以下数据：${NC}"
+echo -e "${YELLOW}  OpenNews Data Cleanup${NC}"
+echo -e "${YELLOW}  The following data will be cleared:${NC}"
 echo -e "${YELLOW}    • PostgreSQL: reports, batch_records, batches${NC}"
 echo -e "${YELLOW}    • Checkpoint: seeds/checkpoint.json${NC}"
 echo -e "${YELLOW}════════════════════════════════════════════════${NC}"
 echo ""
 
-read -rp "确认清除所有数据？(y/N) " confirm
+read -rp "Confirm clearing all data? (y/N) " confirm
 if [[ ! "$confirm" =~ ^[yY]$ ]]; then
-    info "已取消"
+    info "Cancelled"
     exit 0
 fi
 
 echo ""
 
-# ── 清除 PostgreSQL ──────────────────────────────────────
-info "清除 PostgreSQL 数据..."
+# ── Clear PostgreSQL ──────────────────────────────────────
+info "Clearing PostgreSQL data..."
 if PGPASSWORD="$PG_PASSWORD" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" \
     -c "TRUNCATE reports, batch_records, batches RESTART IDENTITY CASCADE;" 2>/dev/null; then
-    ok "PostgreSQL 数据已清除"
+    ok "PostgreSQL data cleared"
 else
-    warn "PostgreSQL 清除失败（数据库或表可能不存在）"
+    warn "PostgreSQL clear failed (database or tables may not exist)"
 fi
 
-# ── 清除 Checkpoint ──────────────────────────────────────
-# 兼容多种运行方式：同时清除脚本目录和 CWD 下的 checkpoint
+# ── Clear Checkpoint ──────────────────────────────────────
+# Compatible with multiple run modes: clear checkpoint in both script dir and CWD
 for cp in "$ROOT/seeds/checkpoint.json" "seeds/checkpoint.json"; do
     if [ -f "$cp" ]; then
         rm -f "$cp"
-        ok "Checkpoint 已清除: $cp"
+        ok "Checkpoint cleared: $cp"
     fi
 done
 
 echo ""
-ok "清理完成，重启服务后将从零开始拉取数据"
+ok "Cleanup complete. Restart services to fetch data from scratch"

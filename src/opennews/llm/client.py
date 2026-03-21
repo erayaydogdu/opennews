@@ -1,4 +1,4 @@
-"""OpenNews LLM Client — 通用 OpenAI 兼容客户端。"""
+"""OpenNews LLM Client — generic OpenAI-compatible client."""
 from __future__ import annotations
 
 import logging
@@ -16,7 +16,7 @@ _DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "llm.yam
 
 @dataclass(slots=True)
 class LLMConfig:
-    """LLM 连接与行为配置。"""
+    """LLM connection and behavior configuration."""
     provider: str = "openai"
     base_url: str | None = None
     api_key: str | None = None
@@ -31,7 +31,7 @@ class LLMConfig:
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> "LLMConfig":
-        """从 YAML 文件加载配置，环境变量可覆盖关键字段。"""
+        """Load config from YAML file; environment variables can override key fields."""
         cfg_path = Path(path) if path else _DEFAULT_CONFIG_PATH
         raw: dict = {}
         if cfg_path.exists():
@@ -41,7 +41,7 @@ class LLMConfig:
         else:
             logger.warning("LLM config not found at %s, using defaults", cfg_path)
 
-        # 环境变量覆盖
+        # Environment variable overrides
         api_key = os.getenv("LLM_API_KEY") or raw.get("api_key")
         base_url = os.getenv("LLM_BASE_URL") or raw.get("base_url")
         model = os.getenv("LLM_MODEL") or raw.get("model", "gpt-4o-mini")
@@ -64,7 +64,7 @@ class LLMConfig:
 
 
 class LLMClient:
-    """OpenAI 兼容的 LLM 客户端。"""
+    """OpenAI-compatible LLM client."""
 
     def __init__(self, config: LLMConfig | None = None):
         self.config = config or LLMConfig.load()
@@ -76,10 +76,10 @@ class LLMClient:
             kwargs = {"api_key": self.config.api_key, "timeout": self.config.timeout}
             if self.config.base_url:
                 kwargs["base_url"] = self.config.base_url
-            # 禁用 SDK 内部重试，由 chat() 方法统一管理重试逻辑
+            # Disable SDK internal retries; retry logic is managed by the chat() method
             kwargs["max_retries"] = 0
-            # 覆盖 SDK 默认的 User-Agent（OpenAI/Python x.x.x），
-            # 避免被 Cloudflare bot 检测拦截（error 1010 / 403）
+            # Override SDK default User-Agent (OpenAI/Python x.x.x)
+            # to avoid Cloudflare bot detection blocks (error 1010 / 403)
             kwargs["default_headers"] = {
                 "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
             }
@@ -89,8 +89,8 @@ class LLMClient:
         return self._client
 
     def chat(self, system: str, user: str, **kwargs) -> str:
-        """发送一次 chat completion 请求，返回 assistant 回复文本。
-        遇到 5xx / 429 错误时自动重试（指数退避，最多 3 次）。"""
+        """Send a chat completion request and return the assistant reply text.
+        Automatically retries on 5xx / 429 errors (exponential backoff, up to 3 times)."""
         client = self._get_client()
         max_retries = 3
         for attempt in range(max_retries):

@@ -1,7 +1,7 @@
-"""Classifier Agent — 零样本新闻分类（金融/政策/公司事件等）。
+"""Classifier Agent — zero-shot news classification (finance/policy/company events, etc.).
 
-使用 DeBERTa-v3-base-mnli 做 zero-shot classification，
-输出类别 + 置信度。
+Uses DeBERTa-v3-base-mnli for zero-shot classification,
+outputs category + confidence.
 """
 from __future__ import annotations
 
@@ -15,25 +15,25 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class ClassificationResult:
-    """单条新闻的分类结果。"""
-    category: str          # 最高置信度类别
-    confidence: float      # 对应置信度 0-1
-    all_scores: dict[str, float]  # 所有候选类别 → 置信度
+    """Classification result for a single news item."""
+    category: str          # Highest-confidence category
+    confidence: float      # Corresponding confidence 0-1
+    all_scores: dict[str, float]  # All candidate categories → confidence
 
 
 class ClassifierAgent:
-    """零样本新闻分类 Agent。
+    """Zero-shot news classification Agent.
 
-    Prompt 设计思路（论文依据 LLM-Assisted News Discovery）：
-    - 候选标签映射到金融领域语义：
-      financial_market  → 金融市场动态
-      policy_regulation → 政策法规变动
-      company_event     → 公司事件（财报/并购/人事）
-      macro_economy     → 宏观经济指标
-      industry_trend    → 行业趋势
+    Prompt design rationale (based on LLM-Assisted News Discovery):
+    - Candidate labels mapped to financial domain semantics:
+      financial_market  → Financial market dynamics
+      policy_regulation → Policy and regulatory changes
+      company_event     → Company events (earnings/M&A/personnel)
+      macro_economy     → Macroeconomic indicators
+      industry_trend    → Industry trends
     """
 
-    # 候选标签 → 自然语言假设模板（提升 NLI 零样本效果）
+    # Candidate labels → natural-language hypothesis templates (improves NLI zero-shot performance)
     LABEL_HYPOTHESES: dict[str, str] = {
         "financial_market": "This news is about financial markets, stock prices, bonds, or trading.",
         "policy_regulation": "This news is about government policy, regulation, or central bank decisions.",
@@ -45,17 +45,17 @@ class ClassifierAgent:
     def __init__(self, model_name: str, candidate_labels: list[str] | None = None):
         self.model_name = model_name
         self.candidate_labels = candidate_labels or list(self.LABEL_HYPOTHESES.keys())
-        # 构建假设模板列表（与 candidate_labels 顺序对齐）
+        # Build hypothesis template list (aligned with candidate_labels order)
         self._hypothesis_template = "This text is about {}."
         logger.info("loading classifier model: %s", model_name)
         self._clf = pipeline(
             "zero-shot-classification",
             model=model_name,
-            device=-1,  # CPU，可改为 0 用 GPU
+            device=-1,  # CPU; change to 0 for GPU
         )
 
     def classify(self, text: str) -> ClassificationResult:
-        """对单条新闻文本做零样本分类。"""
+        """Perform zero-shot classification on a single news text."""
         result = self._clf(
             text,
             candidate_labels=self.candidate_labels,
@@ -75,7 +75,7 @@ class ClassifierAgent:
         )
 
     def classify_batch(self, texts: list[str]) -> list[ClassificationResult]:
-        """批量分类。"""
+        """Batch classification."""
         if not texts:
             return []
         results = self._clf(
@@ -84,7 +84,7 @@ class ClassifierAgent:
             hypothesis_template=self._hypothesis_template,
             multi_label=False,
         )
-        # 单条时 pipeline 返回 dict 而非 list
+        # Pipeline returns dict instead of list for single input
         if isinstance(results, dict):
             results = [results]
         out: list[ClassificationResult] = []

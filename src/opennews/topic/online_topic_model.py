@@ -10,28 +10,28 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 logger = logging.getLogger(__name__)
 
-# 完全链接层次聚类的距离阈值
-# 距离 = 1 - cosine_similarity，阈值 0.35 意味着簇内任意两篇相似度 >= 0.65
+# Distance threshold for complete-linkage hierarchical clustering
+# Distance = 1 - cosine_similarity; threshold 0.35 means any two items in a cluster have similarity >= 0.65
 DISTANCE_THRESHOLD = 0.35
 
-# 至少 2 篇才算聚合主题
+# Minimum 2 items to form an aggregated topic
 MIN_CLUSTER_SIZE = 2
 
-# 单个簇的最大容量，超过则用更严格阈值递归拆分
+# Max cluster size; exceeding triggers recursive splitting with stricter threshold
 MAX_CLUSTER_SIZE = 15
 
-# 递归拆分时每次收紧的距离步长
+# Distance step to tighten per recursive split
 _SPLIT_STEP = 0.05
 
-# 中文 embedding 模型
+# Chinese embedding model
 _CHINESE_EMBED_MODEL = "BAAI/bge-base-zh-v1.5"
 
 
 def _make_bilingual_label(title: str) -> dict[str, str]:
-    """根据标题语种生成初始双语 label。
+    """Generate initial bilingual label based on title language.
 
-    中文标题 → zh=标题, en="[ZH] 标题"
-    英文标题 → zh="[EN] 标题", en=标题
+    Chinese title → zh=title, en="[ZH] title"
+    English title → zh="[EN] title", en=title
     """
     cjk = sum(1 for c in title if '\u4e00' <= c <= '\u9fff')
     is_zh = cjk / max(len(title.replace(" ", "")), 1) > 0.3
@@ -70,8 +70,8 @@ class OnlineTopicModel:
         self._labels.clear()
         n = len(docs)
 
-        # 只有当外部传入的 embeddings 维度与本模型一致时才复用，
-        # 否则用自己的 embedder 重新编码（避免不同模型 embedding 空间混用）
+        # Only reuse external embeddings if dimensions match this model,
+        # otherwise re-encode with own embedder (avoid mixing embedding spaces from different models)
         if embeddings is not None:
             emb_arr = np.array(embeddings) if not isinstance(embeddings, np.ndarray) else embeddings
             expected_dim = self._get_embedder().get_sentence_embedding_dimension()
@@ -88,26 +88,26 @@ class OnlineTopicModel:
             emb = self._get_embedder().encode(docs, show_progress_bar=False)
         sim = cosine_similarity(emb)
 
-        # 单篇直接独立
+        # Single document, assign as solo
         if n == 1:
             return self._assign_all_solo(docs)
 
-        # ── 层次聚类（complete linkage）──────────────
-        # complete linkage 保证簇内任意两点距离 <= 阈值
+        # ── Hierarchical clustering (complete linkage) ──────────────
+        # Complete linkage ensures distance between any two points in a cluster <= threshold
         dist = 1.0 - sim
         np.fill_diagonal(dist, 0.0)
-        dist = np.clip(dist, 0, None)  # 避免浮点误差导致负值
+        dist = np.clip(dist, 0, None)  # Prevent negative values from floating-point errors
         condensed = squareform(dist, checks=False)
         Z = linkage(condensed, method="complete")
         labels = fcluster(Z, t=DISTANCE_THRESHOLD, criterion="distance")
 
-        # ── 统计每个簇 ───────────────────────────────
+        # ── Count each cluster ───────────────────────────────
         from collections import Counter
         cluster_counts = Counter(labels)
 
-        # ── 拆分过大的簇 ──────────────────────────────
-        # 对超过 MAX_CLUSTER_SIZE 的簇，用更严格阈值递归二次聚类
-        final_clusters: list[list[int]] = []  # 每个元素是该簇包含的全局文档索引列表
+        # ── Split oversized clusters ──────────────────────────────
+        # For clusters exceeding MAX_CLUSTER_SIZE, recursively re-cluster with stricter threshold
+        final_clusters: list[list[int]] = []  # Each element is a list of global document indices in that cluster
         processed_scipy_labels: set[int] = set()
 
         for scipy_label, count in cluster_counts.items():
@@ -117,17 +117,17 @@ class OnlineTopicModel:
             members = [j for j in range(n) if labels[j] == scipy_label]
 
             if count < MIN_CLUSTER_SIZE:
-                # 独立新闻，不加入 final_clusters，后面单独处理
+                # Solo news items, not added to final_clusters; handled separately below
                 continue
 
             if count <= MAX_CLUSTER_SIZE:
                 final_clusters.append(members)
             else:
-                # 递归拆分
+                # Recursive split
                 sub_clusters = self._split_large_cluster(members, dist, DISTANCE_THRESHOLD)
                 final_clusters.extend(sub_clusters)
 
-        # ── 分配 topic_id ─────────────────────────────
+        # ── Assign topic_id ─────────────────────────────
         assignments: list[TopicAssignment] = [None] * n  # type: ignore
         cluster_id = 0
         solo_id = -1
@@ -135,7 +135,7 @@ class OnlineTopicModel:
 
         for members in final_clusters:
             if len(members) < MIN_CLUSTER_SIZE:
-                # 拆分后不足 2 篇的降为 solo
+                # Clusters with fewer than 2 items after splitting are demoted to solo
                 for j in members:
                     title = docs[j].split("\n")[0]
                     self._labels[solo_id] = _make_bilingual_label(title)
@@ -155,7 +155,7 @@ class OnlineTopicModel:
 
             cluster_id += 1
 
-        # 处理原始聚类中的独立新闻（count < MIN_CLUSTER_SIZE）
+        # Handle solo news from original clustering (count < MIN_CLUSTER_SIZE)
         for i in range(n):
             if i not in assigned:
                 title = docs[i].split("\n")[0]
@@ -176,24 +176,24 @@ class OnlineTopicModel:
         full_dist: np.ndarray,
         current_threshold: float,
     ) -> list[list[int]]:
-        """递归拆分超过 MAX_CLUSTER_SIZE 的簇。
+        """Recursively split clusters exceeding MAX_CLUSTER_SIZE.
 
-        每次收紧距离阈值 _SPLIT_STEP，直到所有子簇 <= MAX_CLUSTER_SIZE
-        或阈值降到 0.05 以下（兜底停止）。
+        Tightens distance threshold by _SPLIT_STEP each time until all sub-clusters <= MAX_CLUSTER_SIZE
+        or threshold drops below 0.05 (fallback stop).
         """
         if len(members) <= MAX_CLUSTER_SIZE:
             return [members]
 
         new_threshold = current_threshold - _SPLIT_STEP
         if new_threshold < 0.05:
-            # 阈值已经很严格了，强制接受当前簇
+            # Threshold already very strict, force-accept current cluster
             logger.warning(
                 "cluster of %d items cannot be split further (threshold=%.2f), keeping as-is",
                 len(members), current_threshold,
             )
             return [members]
 
-        # 提取子距离矩阵
+        # Extract sub-distance matrix
         idx = np.array(members)
         sub_dist = full_dist[np.ix_(idx, idx)]
         np.fill_diagonal(sub_dist, 0.0)
@@ -215,7 +215,7 @@ class OnlineTopicModel:
             sub_members = [members[j] for j in range(len(members)) if sub_labels[j] == sl]
 
             if len(sub_members) > MAX_CLUSTER_SIZE:
-                # 仍然过大，继续递归
+                # Still too large, continue recursion
                 result.extend(
                     OnlineTopicModel._split_large_cluster(sub_members, full_dist, new_threshold)
                 )
@@ -238,12 +238,12 @@ class OnlineTopicModel:
         return assignments
 
     def get_topic_label(self, topic_id: int) -> dict[str, str]:
-        """返回 {"zh": "...", "en": "..."} 双语标签。"""
+        """Return {"zh": "...", "en": "..."} bilingual label."""
         fallback = f"topic_{topic_id}"
         label = self._labels.get(topic_id)
         if label is None:
             return {"zh": fallback, "en": fallback}
-        # 兼容旧的 str 格式
+        # Backward-compatible with old str format
         if isinstance(label, str):
             return {"zh": label, "en": label}
         return label

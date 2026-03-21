@@ -1,7 +1,7 @@
-"""GraphRAG 同主题子图查询 — 社区检测 + 同 topic 聚合。
+"""GraphRAG same-topic subgraph query — community detection + topic aggregation.
 
-从 Neo4j 中查询同一 topic 下的新闻子图，
-支持社区检测（基于共享实体的连通分量）和趋势注入。
+Queries the news subgraph under the same topic from Neo4j,
+supporting community detection (connected components based on shared entities) and trend injection.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class SubgraphNews:
-    """子图中的新闻节点摘要。"""
+    """News node summary within the subgraph."""
     news_id: str
     title: str
     published_at: str
@@ -28,25 +28,25 @@ class SubgraphNews:
 
 @dataclass(slots=True)
 class TopicSubgraph:
-    """某 topic 的子图。"""
+    """Subgraph for a topic."""
     topic_id: int
     topic_label: str
     news_items: list[SubgraphNews]
-    shared_entities: list[dict]   # 共享实体列表
-    community_count: int          # 基于共享实体的社区数
+    shared_entities: list[dict]   # List of shared entities
+    community_count: int          # Community count based on shared entities
 
 
 class GraphRAGQuerier:
-    """GraphRAG 子图查询器。"""
+    """GraphRAG subgraph querier."""
 
     def __init__(self, graph_client):
         self.client = graph_client
 
     def query_topic_subgraph(self, topic_id: int, limit: int = 100) -> TopicSubgraph | None:
-        """查询某 topic 下的新闻子图 + 共享实体。"""
+        """Query news subgraph + shared entities under a topic."""
         try:
             with self.client.session() as s:
-                # 查询 topic 下的新闻
+                # Query news under the topic
                 result = s.run(
                     """
                     MATCH (n:News)-[:IN_TOPIC]->(t:Topic {topic_id: $topic_id})
@@ -78,7 +78,7 @@ class GraphRAGQuerier:
                     for r in records
                 ]
 
-                # 查询共享实体（被 >=2 条新闻 MENTIONS 的实体）
+                # Query shared entities (entities mentioned by >=2 news items)
                 entity_result = s.run(
                     """
                     MATCH (n:News)-[:IN_TOPIC]->(t:Topic {topic_id: $topic_id})
@@ -102,7 +102,7 @@ class GraphRAGQuerier:
                     for r in entity_result
                 ]
 
-                # 简单社区检测：基于共享实体的连通分量
+                # Simple community detection: connected components based on shared entities
                 community_count = self._count_communities(s, topic_id)
 
                 return TopicSubgraph(
@@ -120,10 +120,10 @@ class GraphRAGQuerier:
             return None
 
     def _count_communities(self, session, topic_id: int) -> int:
-        """基于共享实体的连通分量计数（简化版社区检测）。
+        """Connected component count based on shared entities (simplified community detection).
 
-        思路：同 topic 下，两条新闻如果共享至少一个实体，
-        则属于同一社区。用 Union-Find 计算连通分量数。
+        Approach: within the same topic, if two news items share at least one entity,
+        they belong to the same community. Uses Union-Find to count connected components.
         """
         try:
             result = session.run(
@@ -138,7 +138,7 @@ class GraphRAGQuerier:
             )
             edges = [(r["a"], r["b"]) for r in result]
 
-            # 收集所有节点
+            # Collect all nodes
             all_news_result = session.run(
                 """
                 MATCH (n:News)-[:IN_TOPIC]->(t:Topic {topic_id: $topic_id})
@@ -176,7 +176,7 @@ class GraphRAGQuerier:
             return 0
 
     def upsert_topic_trend(self, topic_id: int, trend_data: dict) -> bool:
-        """将累积影响趋势写入 Topic 节点。"""
+        """Write cumulative impact trend to Topic node."""
         try:
             with self.client.session() as s:
                 s.run(

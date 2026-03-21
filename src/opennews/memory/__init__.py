@@ -1,7 +1,7 @@
-"""Redis 时序记忆存储 — 滚动窗口 30 天。
+"""Redis time-series memory store — 30-day rolling window.
 
-每条新闻按 topic_id 存入 Redis Sorted Set（score = 时间戳），
-自动清理超出窗口的旧数据。Redis 不可用时 fallback 到内存字典。
+Each news item is stored in a Redis Sorted Set by topic_id (score = timestamp),
+automatically cleaning up data beyond the window. Falls back to in-memory dict when Redis is unavailable.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class MemoryRecord:
-    """单条时序记忆记录。"""
+    """A single time-series memory record."""
     news_id: str
     topic_id: int
     published_at: str          # ISO format
@@ -48,9 +48,9 @@ def _topic_key(topic_id: int) -> str:
 
 
 class RedisMemoryStore:
-    """Redis-backed 时序记忆，Sorted Set 按时间戳排序。
+    """Redis-backed time-series memory, Sorted Set ordered by timestamp.
 
-    Redis 不可用时自动 fallback 到内存字典，不崩溃。
+    Automatically falls back to in-memory dict when Redis is unavailable.
     """
 
     def __init__(self, redis_url: str, window_days: int = 30):
@@ -69,7 +69,7 @@ class RedisMemoryStore:
             self._use_fallback = True
 
     def add(self, record: MemoryRecord) -> None:
-        """写入一条记忆。"""
+        """Write a single memory record."""
         key = _topic_key(record.topic_id)
         ts = datetime.fromisoformat(record.published_at).timestamp()
         payload = record.to_json()
@@ -90,7 +90,7 @@ class RedisMemoryStore:
             self.add(r)
 
     def query_topic(self, topic_id: int, days: int | None = None) -> list[MemoryRecord]:
-        """查询某 topic 在窗口内的所有记忆。"""
+        """Query all memory records for a topic within the window."""
         key = _topic_key(topic_id)
         window = days or self.window_days
         cutoff = (datetime.now(timezone.utc) - timedelta(days=window)).timestamp()
@@ -116,7 +116,7 @@ class RedisMemoryStore:
                 ]
 
     def _trim_redis(self, key: str) -> None:
-        """清理超出窗口的旧数据。"""
+        """Clean up data beyond the window."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=self.window_days)).timestamp()
         try:
             self._redis.zremrangebyscore(key, "-inf", cutoff)
