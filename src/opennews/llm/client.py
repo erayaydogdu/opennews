@@ -104,10 +104,13 @@ class LLMClient:
                     temperature=kwargs.get("temperature", self.config.temperature),
                     max_tokens=kwargs.get("max_tokens", self.config.max_tokens),
                 )
-                return resp.choices[0].message.content.strip()
+                content = resp.choices[0].message.content
+                if content is None:
+                    raise ValueError("LLM returned empty content (message.content is None)")
+                return content.strip()
             except Exception as e:
                 err_str = str(e)
-                is_retryable = any(code in err_str for code in ("502", "503", "429"))
+                is_retryable = any(code in err_str for code in ("502", "503", "429", "empty content"))
                 if is_retryable and attempt < max_retries - 1:
                     wait = 3 * (2 ** attempt)  # 3s, 6s, 12s
                     logger.warning("LLM request failed (attempt %d/%d), retrying in %ds: %s",
