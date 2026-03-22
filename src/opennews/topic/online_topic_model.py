@@ -23,8 +23,8 @@ MAX_CLUSTER_SIZE = 15
 # Distance step to tighten per recursive split
 _SPLIT_STEP = 0.05
 
-# Chinese embedding model
-_CHINESE_EMBED_MODEL = "BAAI/bge-base-zh-v1.5"
+# Topic embedding model (same as main pipeline embedder)
+_TOPIC_EMBED_MODEL = "ProsusAI/finbert"
 
 
 def _make_bilingual_label(title: str) -> dict[str, str]:
@@ -55,8 +55,8 @@ class OnlineTopicModel:
     def _get_embedder(self):
         if self._embedder is None:
             from sentence_transformers import SentenceTransformer
-            self._embedder = SentenceTransformer(_CHINESE_EMBED_MODEL)
-            logger.info("loaded topic embedding model: %s", _CHINESE_EMBED_MODEL)
+            self._embedder = SentenceTransformer(_TOPIC_EMBED_MODEL)
+            logger.info("loaded topic embedding model: %s", _TOPIC_EMBED_MODEL)
         return self._embedder
 
     def update_and_assign(
