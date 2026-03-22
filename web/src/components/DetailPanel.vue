@@ -1,5 +1,5 @@
 <template>
-  <aside class="detail-panel" :class="{ open: !!item }" aria-label="新闻详情面板" role="complementary">
+  <aside class="detail-panel" :class="{ open: !!item }" aria-label="News detail panel" role="complementary">
     <div class="detail-panel-inner">
       <button class="detail-close" @click="$emit('close')">✕</button>
       <div v-if="item" class="detail-body">
@@ -11,9 +11,9 @@
           <span class="d-tag">{{ fmtTime(news.published_at) }}</span>
         </div>
 
-        <!-- DK-COT 四维评分 -->
+        <!-- DK-COT 4-Dimension Scoring -->
         <div class="d-section">
-          <div class="d-section-title">DK-COT 四维评分</div>
+          <div class="d-section-title">DK-COT 4-Dimension Scoring</div>
           <div class="d-scores">
             <div v-for="d in dims" :key="d.key" class="d-score-row">
               <span class="d-score-label">{{ d.label }} <span style="color:var(--text-dim);font-size:9px">{{ d.weight }}</span></span>
@@ -23,7 +23,7 @@
               <span class="d-score-val" :style="{ color: scoreColor(dkScores[d.key] ?? 0) }">{{ (dkScores[d.key] ?? 0).toFixed(1) }}</span>
             </div>
             <div class="d-score-row" style="margin-top:4px;padding-top:6px;border-top:1px solid var(--border)">
-              <span class="d-score-label" style="font-weight:700;color:var(--text-bright)">加权总分</span>
+              <span class="d-score-label" style="font-weight:700;color:var(--text-bright)">Weighted Total</span>
               <div class="d-score-track">
                 <div class="d-score-fill" :style="{ width: score + '%', background: scoreColor(score) }"></div>
               </div>
@@ -32,9 +32,9 @@
           </div>
         </div>
 
-        <!-- 7 维特征 -->
+        <!-- 7-Dimension Features -->
         <div class="d-section">
-          <div class="d-section-title">7 维特征 (1-5)</div>
+          <div class="d-section-title">7-Dimension Features (1-5)</div>
           <div class="d-features">
             <div v-for="f in featKeys" :key="f.key" class="d-feat">
               <div class="d-feat-val">{{ (feat[f.key] ?? 0).toFixed(2) }}</div>
@@ -43,9 +43,9 @@
           </div>
         </div>
 
-        <!-- 分类置信度 -->
+        <!-- Classification Confidence -->
         <div class="d-section">
-          <div class="d-section-title">分类置信度</div>
+          <div class="d-section-title">Classification Confidence</div>
           <div class="d-clf-scores">
             <div v-for="[cat, pct] in clfScores" :key="cat" class="d-clf-row">
               <span class="d-clf-label" :style="{ color: catColor[cat] || '#6b7280' }">{{ catLabel[cat] || cat }}</span>
@@ -57,9 +57,9 @@
           </div>
         </div>
 
-        <!-- 识别实体 -->
+        <!-- Recognized Entities -->
         <div v-if="entities.length" class="d-section">
-          <div class="d-section-title">识别实体</div>
+          <div class="d-section-title">Recognized Entities</div>
           <div class="d-entities">
             <span v-for="(e, i) in entities" :key="i" class="d-entity">
               {{ e.name }}<span class="d-entity-type">{{ e.type }}</span>
@@ -67,19 +67,19 @@
           </div>
         </div>
 
-        <!-- DK-COT 推理过程 -->
+        <!-- DK-COT Reasoning -->
         <div v-if="report.reasoning" class="d-section">
           <details class="d-reasoning-toggle" @toggle="onToggle">
             <summary class="d-section-title" style="cursor:pointer;user-select:none">
-              DK-COT 推理过程 <span ref="toggleHint" style="font-size:10px;color:var(--text-dim);font-weight:400">▶ 展开</span>
+              DK-COT Reasoning <span ref="toggleHint" style="font-size:10px;color:var(--text-dim);font-weight:400">▶ Expand</span>
             </summary>
             <div class="d-reasoning">{{ report.reasoning }}</div>
           </details>
         </div>
 
-        <!-- 原文摘要 -->
+        <!-- Summary -->
         <div class="d-section">
-          <div class="d-section-title">原文摘要</div>
+          <div class="d-section-title">Summary</div>
           <p style="font-size:13px;line-height:1.7;color:var(--text)">{{ news.content || '—' }}</p>
           <a
             v-if="isValidUrl(news.url)"
@@ -87,7 +87,7 @@
             target="_blank"
             rel="noopener noreferrer"
             style="font-family:var(--font-mono);font-size:11px;color:var(--accent);margin-top:8px;display:inline-block"
-          >查看原文 →</a>
+          >View original →</a>
         </div>
       </div>
     </div>
@@ -110,7 +110,7 @@ const feat = computed<Record<string, number>>(() => (props.item?.features || {})
 const report = computed<Partial<ReportData>>(() => props.item?.report || {})
 const entities = computed<EntityData[]>(() => props.item?.entities || [])
 const dkScores = computed<Record<string, number>>(() => report.value.dk_cot_scores || {})
-const level = computed(() => report.value.impact_level || '低')
+const level = computed(() => report.value.impact_level || 'Low')
 const score = computed(() => report.value.final_score ?? 0)
 
 const clfScores = computed(() =>
@@ -118,10 +118,10 @@ const clfScores = computed(() =>
 )
 
 const dims = [
-  { key: 'stock_relevance', label: '股价相关性', weight: '40%' },
-  { key: 'market_sentiment', label: '市场情绪', weight: '20%' },
-  { key: 'policy_risk', label: '政策风险', weight: '20%' },
-  { key: 'spread_breadth', label: '传播广度', weight: '20%' },
+  { key: 'stock_relevance', label: 'Stock Relevance', weight: '40%' },
+  { key: 'market_sentiment', label: 'Market Sentiment', weight: '20%' },
+  { key: 'policy_risk', label: 'Policy Risk', weight: '20%' },
+  { key: 'spread_breadth', label: 'Spread Breadth', weight: '20%' },
 ]
 
 const featKeys = [
@@ -138,7 +138,7 @@ const featKeys = [
 function onToggle(e: Event) {
   const details = e.target as HTMLDetailsElement
   if (toggleHint.value) {
-    toggleHint.value.textContent = details.open ? '▼ 折叠' : '▶ 展开'
+    toggleHint.value.textContent = details.open ? '▼ Collapse' : '▶ Expand'
   }
 }
 </script>
