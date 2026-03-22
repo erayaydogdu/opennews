@@ -7,17 +7,19 @@
 # Each url maps to a NewsNow-compatible API endpoint; sources are the channels under that endpoint
 
 newsnow:
-  - url: https://newsnow.busiyi.world/api/s/entire
+  - url: https://newsnow.erayaydogdu.com/api/s/entire
     sources:
-      - wallstreetcn-news
-      - fastbull-express
-      - gelonghui
-      - cls-telegraph
-      - cankaoxiaoxi
-      - sputniknewscn
-      - zaobao
+      - finnhub
+      - marketaux
+      - stockdata
+      - alphavantage
+      - polygon
+      - newsapi
+      - gnews
       - mktnews-flash
       - hackernews
-      - solidot
-      - 36kr-quick
-      - sputniknewscn
+      - eodhd
+      - currentsapi
+      - mediastack
+      - bbc-business
+      - yahoo-finance
