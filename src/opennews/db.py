@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS reports (
     id          SERIAL PRIMARY KEY,
     batch_id    INTEGER NOT NULL REFERENCES batches(batch_id) ON DELETE CASCADE,
     news_id     VARCHAR(128),
-    impact_level VARCHAR(4),
+    impact_level VARCHAR(16),
     markdown    TEXT,
     summary     JSONB
 );
