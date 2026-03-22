@@ -1,3 +1,10 @@
+FROM node:22-alpine AS frontend
+WORKDIR /build
+COPY web/package.json web/package-lock.json* ./
+RUN npm install
+COPY web/ .
+RUN npx vite build
+
 FROM python:3.13-slim
 
 WORKDIR /app
@@ -14,9 +21,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Remove build tools to keep image smaller
 RUN apt-get purge -y --auto-remove gcc g++
 
-# Copy source code and pre-built frontend assets
+# Copy source code
 COPY src/ src/
 COPY web/ web/
+# Copy built frontend assets from the frontend stage
+COPY --from=frontend /build/dist web/dist
 ENV PYTHONPATH=/app/src
 ENV PYTHONUNBUFFERED=1
 
