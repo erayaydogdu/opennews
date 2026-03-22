@@ -1,5 +1,5 @@
 <template>
-  <nav v-if="totalPages > 1" class="pagination" aria-label="分页导航">
+  <nav v-if="totalPages > 1" class="pagination" aria-label="Pagination">
     <button class="page-btn" :disabled="currentPage <= 1" @click="$emit('go', currentPage - 1)">‹</button>
 
     <template v-if="startPage > 1">

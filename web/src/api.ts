@@ -12,11 +12,11 @@ export async function fetchRecords(
   if (!resp.ok) throw new Error('no data')
   const data = await resp.json()
 
-  // 兼容分页响应和旧的纯数组格式
+  // Handle both paginated and legacy array formats
   if (Array.isArray(data)) {
     return {
       items: data, page: 1, total_pages: 1, total_topics: 0,
-      total_items: data.length, above75: 0, score_bins: [], levels: { '高': 0, '中': 0, '低': 0 },
+      total_items: data.length, above75: 0, score_bins: [], levels: { High: 0, Medium: 0, Low: 0 },
     }
   }
   return {
@@ -27,7 +27,7 @@ export async function fetchRecords(
     total_items: data.total_items || 0,
     above75: data.above75 || 0,
     score_bins: data.score_bins || [],
-    levels: data.levels || { '高': 0, '中': 0, '低': 0 },
+    levels: data.levels || { High: 0, Medium: 0, Low: 0 },
   }
 }
 

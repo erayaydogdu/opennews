@@ -81,10 +81,10 @@ const totalPages = ref(1)
 const totalTopics = ref(0)
 const globalStats = ref<GlobalStats>({
   total_items: 0, above75: 0, score_bins: [], total_topics: 0,
-  levels: { '高': 0, '中': 0, '低': 0 },
+  levels: { High: 0, Medium: 0, Low: 0 },
 })
 const openTopics = reactive(new Set<string>())
-const emptyText = ref('加载中…')
+const emptyText = ref('Loading…')
 
 const chartRef = ref<InstanceType<typeof ChartSection>>()
 const topicListRef = ref<InstanceType<typeof TopicList>>()
@@ -98,9 +98,9 @@ const stats = computed(() => {
   return {
     total: g.total_items,
     topics: g.total_topics,
-    high: g.levels['高'],
-    mid: g.levels['中'],
-    low: g.levels['低'],
+    high: g.levels.High,
+    mid: g.levels.Medium,
+    low: g.levels.Low,
   }
 })
 
@@ -149,23 +149,23 @@ function onKeydown(e: KeyboardEvent) {
 
 // ── filter ──────────────────────────────────────────────
 function applyFilter() {
-  // hours 模式下由后端筛选，重新请求第1页
+  // hours mode: backend filters, request page 1
   if (source.value.startsWith('hours:')) {
     currentPage.value = 1
     loadData(undefined, 1)
     return
   }
-  // batch / import 模式下仍在前端过滤
+  // batch / import mode: filter on the frontend
   filteredItems.value = allItems.value.filter(d => {
     const s = d.report?.final_score ?? 0
     return s >= rangeLo.value && s <= rangeHi.value
   })
 }
 
-// 防抖版 applyFilter，用于滑块拖动（避免频繁请求后端）
+// Debounced applyFilter for slider dragging
 let _filterTimer: ReturnType<typeof setTimeout> | null = null
 function debouncedApplyFilter() {
-  // batch / import 模式无需防抖，直接过滤
+  // batch / import mode: no debounce needed
   if (!source.value.startsWith('hours:')) {
     applyFilter()
     return
@@ -186,7 +186,7 @@ async function loadData(src?: string, page?: number) {
       const p = page ?? currentPage.value
       const result = await fetchRecords(h, p, rangeLo.value, rangeHi.value)
       allItems.value = result.items.filter(d => d.news && d.report)
-      filteredItems.value = allItems.value  // 后端已筛选，直接使用
+      filteredItems.value = allItems.value  // backend already filtered
       currentPage.value = result.page
       totalPages.value = result.total_pages
       totalTopics.value = result.total_topics
@@ -203,10 +203,10 @@ async function loadData(src?: string, page?: number) {
       currentPage.value = 1
       totalPages.value = 1
       totalTopics.value = 0
-      // batch 模式下从本地数据计算全局统计
+      // batch mode: compute global stats from local data
       const batchItems = allItems.value
       const bins = new Array(100).fill(0)
-      const lvls = { '高': 0, '中': 0, '低': 0 } as Record<string, number>
+      const lvls = { High: 0, Medium: 0, Low: 0 } as Record<string, number>
       let a75 = 0
       const topicSet = new Set<number>()
       batchItems.forEach(d => {
@@ -222,15 +222,15 @@ async function loadData(src?: string, page?: number) {
         above75: a75,
         score_bins: bins,
         total_topics: topicSet.size,
-        levels: { '高': lvls['高'] || 0, '中': lvls['中'] || 0, '低': lvls['低'] || 0 },
+        levels: { High: lvls.High || 0, Medium: lvls.Medium || 0, Low: lvls.Low || 0 },
       }
     }
 
     if (allItems.value.length === 0) {
-      emptyText.value = '所选时间范围内无数据'
+      emptyText.value = 'No data in the selected time range'
     }
 
-    // batch / import 模式需要前端过滤；hours 模式后端已筛选
+    // batch / import mode: filter on frontend; hours mode: backend already filtered
     if (!s.startsWith('hours:')) {
       filteredItems.value = allItems.value.filter(d => {
         const sc = d.report?.final_score ?? 0
@@ -238,7 +238,7 @@ async function loadData(src?: string, page?: number) {
       })
     }
 
-    // 自动刷新时保持详情面板
+    // keep detail panel on auto-refresh
     if (activeNewsId.value) {
       const still = allItems.value.find(d => d.news?.news_id === activeNewsId.value)
       if (still) detailItem.value = still
@@ -251,9 +251,9 @@ async function loadData(src?: string, page?: number) {
     totalTopics.value = 0
     globalStats.value = {
       total_items: 0, above75: 0, score_bins: [], total_topics: 0,
-      levels: { '高': 0, '中': 0, '低': 0 },
+      levels: { High: 0, Medium: 0, Low: 0 },
     }
-    emptyText.value = '暂无数据 — 请先运行后端流水线产出批次数据'
+    emptyText.value = 'No data — please run the backend pipeline first'
   }
 }
 
@@ -279,9 +279,9 @@ function onImportJson(items: BatchItem[]) {
   currentPage.value = 1
   totalPages.value = 1
   totalTopics.value = 0
-  // 从导入数据计算全局统计
+  // compute global stats from imported data
   const bins = new Array(100).fill(0)
-  const lvls = { '高': 0, '中': 0, '低': 0 } as Record<string, number>
+  const lvls = { High: 0, Medium: 0, Low: 0 } as Record<string, number>
   let a75 = 0
   const topicSet = new Set<number>()
   items.forEach(d => {
@@ -297,7 +297,7 @@ function onImportJson(items: BatchItem[]) {
     above75: a75,
     score_bins: bins,
     total_topics: topicSet.size,
-    levels: { '高': lvls['高'] || 0, '中': lvls['中'] || 0, '低': lvls['低'] || 0 },
+    levels: { High: lvls.High || 0, Medium: lvls.Medium || 0, Low: lvls.Low || 0 },
   }
   applyFilter()
 }

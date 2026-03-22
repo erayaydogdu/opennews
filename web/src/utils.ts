@@ -8,8 +8,8 @@ export const getTopicLabel = (topic: TopicData | undefined, lang: TopicLang): st
 }
 
 export const levelClass = (level: string): string => {
-  if (level === '高') return 'high'
-  if (level === '中') return 'mid'
+  if (level === 'High') return 'high'
+  if (level === 'Medium') return 'mid'
   return 'low'
 }
 
@@ -37,11 +37,20 @@ export const catColor: Record<string, string> = {
 
 export const sourceName = (src: string | undefined): string => {
   if (!src) return '—'
-  if (src.includes('wallstreetcn')) return '华尔街见闻'
-  if (src.includes('cls')) return '财联社'
-  if (src.includes('caixin')) return '财新'
-  if (src.includes('reuters')) return 'Reuters'
-  if (src.includes('weibo')) return '微博'
+  if (src.includes('finnhub')) return 'Finnhub'
+  if (src.includes('marketaux')) return 'Marketaux'
+  if (src.includes('stockdata')) return 'StockData'
+  if (src.includes('alphavantage')) return 'Alpha Vantage'
+  if (src.includes('polygon')) return 'Polygon'
+  if (src.includes('newsapi')) return 'NewsAPI'
+  if (src.includes('gnews')) return 'GNews'
+  if (src.includes('mktnews')) return 'MktNews Flash'
+  if (src.includes('hackernews')) return 'Hacker News'
+  if (src.includes('eodhd')) return 'EODHD'
+  if (src.includes('currentsapi')) return 'CurrentsAPI'
+  if (src.includes('mediastack')) return 'Mediastack'
+  if (src.includes('bbc')) return 'BBC Business'
+  if (src.includes('yahoo')) return 'Yahoo Finance'
   if (src.includes('seed')) return 'Seed'
   return src
 }
@@ -50,7 +59,7 @@ export const fmtTime = (iso: string | undefined): string => {
   if (!iso) return ''
   const d = new Date(iso)
   if (isNaN(d.getTime())) return iso
-  return d.toLocaleString('zh-CN', {
+  return d.toLocaleString('en-US', {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', hour12: false,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,

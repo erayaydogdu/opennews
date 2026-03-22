@@ -1,11 +1,11 @@
 <template>
-  <section class="chart-section" aria-label="评分分布图与筛选">
+  <section class="chart-section" aria-label="Score distribution chart and filters">
     <div class="chart-header">
       <span class="chart-label">{{ summaryText }}</span>
       <span class="chart-range-text" aria-live="polite">{{ rangeLo.toFixed(1) }} — {{ rangeHi.toFixed(1) }}</span>
       <span class="chart-refresh-text" aria-live="polite">{{ refreshText }}</span>
     </div>
-    <canvas ref="canvasRef" id="distChart" width="960" height="140" role="img" aria-label="新闻影响评分分布图：横轴为 0-100 分，纵轴为新闻数量"></canvas>
+    <canvas ref="canvasRef" id="distChart" width="960" height="140" role="img" aria-label="News impact score distribution: x-axis 0-100, y-axis count"></canvas>
     <div class="range-wrap">
       <div ref="trackRef" class="range-track" @click="onTrackClick">
         <div class="range-fill" :style="fillStyle"></div>

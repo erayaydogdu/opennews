@@ -27,7 +27,7 @@
     <div class="hdr-right">
       <a
         class="github-link"
-        href="https://github.com/IUnlimit/opennews"
+        href="https://github.com/erayaydogdu/opennews"
         target="_blank"
         rel="noopener noreferrer"
         :title="topicLang === 'zh' ? '在 GitHub 上查看源码' : 'View source on GitHub'"

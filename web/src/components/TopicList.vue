@@ -1,5 +1,5 @@
 <template>
-  <section class="topics" aria-label="新闻主题列表">
+  <section class="topics" aria-label="News topics">
     <div v-if="groups.length === 0" class="topics-loading">
       {{ emptyText }}
     </div>

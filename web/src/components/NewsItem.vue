@@ -27,13 +27,13 @@ const props = defineProps<{
 defineEmits<{ select: [nid: string] }>()
 
 const score = computed(() => props.item.report?.final_score ?? 0)
-const level = computed(() => props.item.report?.impact_level ?? '低')
+const level = computed(() => props.item.report?.impact_level ?? 'Low')
 const cat = computed(() => props.item.classification?.category ?? 'unknown')
 const isActive = computed(() => (props.item.news?.news_id ?? '') === props.activeNewsId)
 
 const levelMap: Record<string, Record<string, string>> = {
-  zh: { '高': '高', '中': '中', '低': '低' },
-  en: { '高': 'High', '中': 'Mid', '低': 'Low' },
+  zh: { High: '高', Medium: '中', Low: '低' },
+  en: { High: 'High', Medium: 'Mid', Low: 'Low' },
 }
 const levelLabel = (lv: string, lang: TopicLang) => levelMap[lang]?.[lv] ?? lv
 </script>
